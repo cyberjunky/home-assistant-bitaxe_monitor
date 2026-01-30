@@ -6,7 +6,7 @@
     ],
     "config_flow": true,
     "dependencies": [],
-    "documentation": "https://github.com/cyberjunky/homeassistant-bitaxe_monitor",
+    "documentation": "https://github.com/cyberjunky/home-assistant-bitaxe_monitor",
     "iot_class": "local_polling",
     "requirements": [],
     "version": "1.0.0"

@@ -114,7 +114,7 @@ The integration **automatically detects** which sensors are available on your sp
 
 ### HACS (Recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cyberjunky&repository=homeassistant-bitaxe_monitor&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=cyberjunky&repository=home-assistant-bitaxe_monitor&category=integration)
 
 Alternatively:
 
@@ -285,9 +285,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-[releases-shield]: https://img.shields.io/github/release/cyberjunky/homeassistant-bitaxe_monitor.svg?style=for-the-badge
-[releases]: https://github.com/cyberjunky/homeassistant-bitaxe_monitor/releases
-[commits-shield]: https://img.shields.io/github/commit-activity/y/cyberjunky/homeassistant-bitaxe_monitor.svg?style=for-the-badge
-[commits]: https://github.com/cyberjunky/homeassistant-bitaxe_monitor/commits/main
-[license-shield]: https://img.shields.io/github/license/cyberjunky/homeassistant-bitaxe_monitor.svg?style=for-the-badge
+[releases-shield]: https://img.shields.io/github/release/cyberjunky/home-assistant-bitaxe_monitor.svg?style=for-the-badge
+[releases]: https://github.com/cyberjunky/home-assistant-bitaxe_monitor/releases
+[commits-shield]: https://img.shields.io/github/commit-activity/y/cyberjunky/home-assistant-bitaxe_monitor.svg?style=for-the-badge
+[commits]: https://github.com/cyberjunky/home-assistant-bitaxe_monitor/commits/main
+[license-shield]: https://img.shields.io/github/license/cyberjunky/home-assistant-bitaxe_monitor.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/badge/maintainer-cyberjunky-blue.svg?style=for-the-badge
