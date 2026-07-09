@@ -26,4 +26,5 @@ fi
 export PYTHONPATH="${PYTHONPATH}:${PWD}/custom_components"
 
 # Start Home Assistant with sudo for raw socket access (ARP scanning)
-sudo -E ${HASS_CMD} --config "${PWD}/config" --debug
+# sudo's env_reset strips PYTHONPATH even with -E, so preserve it explicitly
+sudo --preserve-env=PYTHONPATH -E ${HASS_CMD} --config "${PWD}/config" --debug
