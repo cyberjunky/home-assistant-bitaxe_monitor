@@ -15,16 +15,21 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import BitaxeDataUpdateCoordinator
@@ -506,6 +511,10 @@ async def async_setup_entry(
             )
         )
 
+    # Integrated energy (kWh) sensor for the Energy Dashboard, derived from power
+    if "power" in data:
+        entities.append(BitaxeEnergySensor(coordinator, entry))
+
     async_add_entities(entities)
 
 
@@ -540,3 +549,77 @@ class BitaxeSensor(CoordinatorEntity[BitaxeDataUpdateCoordinator], SensorEntity)
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class BitaxeEnergySensor(
+    CoordinatorEntity[BitaxeDataUpdateCoordinator], RestoreEntity, SensorEntity
+):
+    """Energy sensor that integrates the power sensor (W) into kWh over time.
+
+    Trapezoidal integration is used so the device can be added to the Home
+    Assistant Energy Dashboard without requiring a separate Riemann sum helper.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Energy"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(
+        self, coordinator: BitaxeDataUpdateCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Initialize the energy sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_energy"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title,
+            "manufacturer": "Bitaxe",
+            "model": coordinator.data.get("ASICModel", "Unknown"),
+            "sw_version": coordinator.data.get("version", "Unknown"),
+        }
+        self._energy_kwh: float = 0.0
+        self._last_update = None
+        self._last_power: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the accumulated energy value after a restart."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            None,
+            STATE_UNKNOWN,
+            STATE_UNAVAILABLE,
+        ):
+            try:
+                self._energy_kwh = float(last_state.state)
+            except ValueError:
+                self._energy_kwh = 0.0
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Integrate the latest power reading into the running energy total."""
+        data = self.coordinator.data
+        now = dt_util.utcnow()
+        power = data.get("power") if data else None
+
+        if (
+            power is not None
+            and self._last_power is not None
+            and self._last_update is not None
+        ):
+            elapsed_hours = (now - self._last_update).total_seconds() / 3600
+            if elapsed_hours > 0:
+                avg_power = (self._last_power + power) / 2
+                self._energy_kwh += (avg_power * elapsed_hours) / 1000
+
+        self._last_update = now
+        self._last_power = power
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float:
+        """Return the accumulated energy in kWh."""
+        return round(self._energy_kwh, 3)
