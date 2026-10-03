@@ -81,6 +81,8 @@ The integration **automatically detects** which sensors are available on your sp
 |--------|-------------|
 | Best Difficulty (All Time) | Highest difficulty share ever found |
 | Best Difficulty (Session) | Highest difficulty share this session |
+| Best Difficulty (All Time) Formatted | All-time best difficulty abbreviated like AxeOS (e.g. 4.29G) |
+| Best Difficulty (Session) Formatted | Session best difficulty abbreviated like AxeOS (e.g. 1.23M) |
 | Pool Difficulty | Current pool difficulty |
 | Network Difficulty | Bitcoin network difficulty |
 | Block Height | Current blockchain height |
@@ -109,6 +111,14 @@ The integration **automatically detects** which sensors are available on your sp
 | Free Memory | Available heap memory | B |
 | Overheat Mode | Thermal protection status | Normal/Active |
 | Overclock | Overclock status | Enabled/Disabled |
+
+### Firmware Update
+
+| Entity | Description |
+|--------|-------------|
+| Firmware | Shows the installed firmware version and whether a newer release is available on GitHub, with a link to the release and its notes |
+
+The update entity is informational: install the firmware through the AxeOS web interface. The latest release is looked up on GitHub every 6 hours ([ESP-Miner](https://github.com/bitaxeorg/ESP-Miner/releases), or [ESP-Miner-NerdQAxePlus](https://github.com/shufps/ESP-Miner-NerdQAxePlus/releases) for NerdQAxe devices).
 
 ## Installation
 
