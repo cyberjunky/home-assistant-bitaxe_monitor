@@ -1,9 +1,9 @@
 """API client for Bitaxe miner."""
+import asyncio
 import json
 import logging
 
 import aiohttp
-import async_timeout
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,16 +33,16 @@ class BitaxeApiClient:
         """Get data from the API."""
         url = f"{self._base_url}{endpoint}"
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 async with self.session.get(url, allow_redirects=False) as response:
                     response.raise_for_status()
-                    
+
                     # Get response text first for debugging
                     text = await response.text()
-                    
+
                     # Log first 200 chars for debugging
                     _LOGGER.debug("Response from %s (first 200 chars): %s", url, text[:200])
-                    
+
                     # Try to parse as JSON
                     try:
                         data = json.loads(text)
@@ -57,7 +57,7 @@ class BitaxeApiClient:
                             text[:500]
                         )
                         raise BitaxeApiError(f"Invalid JSON response from {url}: {err}") from err
-                        
+
         except TimeoutError as err:
             _LOGGER.error("Timeout fetching data from %s after 10 seconds", url)
             raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err

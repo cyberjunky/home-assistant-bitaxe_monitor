@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from functools import partial
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -34,6 +36,41 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .coordinator import BitaxeDataUpdateCoordinator
 
+# SI suffixes used by AxeOS to abbreviate difficulty values
+DIFFICULTY_SUFFIXES = ("", "k", "M", "G", "T", "P", "E")
+
+
+def _parse_difficulty(value: object) -> float | None:
+    """Return a difficulty as a number.
+
+    Older firmware reports difficulties as abbreviated strings like "4.29G".
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str) or not (text := value.strip()):
+        return None
+    exponent = 0
+    if text[-1] in DIFFICULTY_SUFFIXES[1:] or text[-1] == "K":
+        exponent = "KMGTPE".index(text[-1].upper()) + 1
+        text = text[:-1]
+    try:
+        return float(text) * 1000.0**exponent
+    except ValueError:
+        return None
+
+
+def _format_difficulty(value: object) -> str | None:
+    """Return a difficulty abbreviated like AxeOS does, e.g. 4.29G."""
+    if (number := _parse_difficulty(value)) is None:
+        return None
+    exponent = 0
+    while abs(number) >= 1000 and exponent < len(DIFFICULTY_SUFFIXES) - 1:
+        number /= 1000
+        exponent += 1
+    return f"{number:.2f}".rstrip("0").rstrip(".") + DIFFICULTY_SUFFIXES[exponent]
+
 
 @dataclass(frozen=True, kw_only=True)
 class BitaxeSensorEntityDescription(SensorEntityDescription):
@@ -42,6 +79,8 @@ class BitaxeSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[dict[str, Any]], Any] = lambda _: None
     # If True, sensor is always created (for computed values)
     always_create: bool = False
+    # API key that must be present for the sensor to be created (defaults to key)
+    source_key: str | None = None
 
 
 # All possible sensor descriptions - only created if the key exists in API data
@@ -235,8 +274,8 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         native_unit_of_measurement="J/TH",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: (
-            round(data.get("power", 0) / (data.get("hashRate", 1) / 1000), 2)
-            if data.get("hashRate", 0) > 0
+            round(data["power"] / (data["hashRate"] / 1000), 2)
+            if data.get("power") is not None and (data.get("hashRate") or 0) > 0
             else None
         ),
         icon="mdi:leaf",
@@ -249,15 +288,29 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         key="bestDiff",
         name="Best Difficulty (All Time)",
         state_class=SensorStateClass.TOTAL,
-        value_fn=lambda data: data.get("bestDiff"),
+        value_fn=lambda data: _parse_difficulty(data.get("bestDiff")),
         icon="mdi:trophy",
+    ),
+    BitaxeSensorEntityDescription(
+        key="bestDiff_formatted",
+        name="Best Difficulty (All Time) Formatted",
+        value_fn=lambda data: _format_difficulty(data.get("bestDiff")),
+        icon="mdi:trophy",
+        source_key="bestDiff",
     ),
     BitaxeSensorEntityDescription(
         key="bestSessionDiff",
         name="Best Difficulty (Session)",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("bestSessionDiff"),
+        value_fn=lambda data: _parse_difficulty(data.get("bestSessionDiff")),
         icon="mdi:trophy-outline",
+    ),
+    BitaxeSensorEntityDescription(
+        key="bestSessionDiff_formatted",
+        name="Best Difficulty (Session) Formatted",
+        value_fn=lambda data: _format_difficulty(data.get("bestSessionDiff")),
+        icon="mdi:trophy-outline",
+        source_key="bestSessionDiff",
     ),
     BitaxeSensorEntityDescription(
         key="poolDifficulty",
@@ -425,7 +478,19 @@ def _should_create_sensor(
     """Determine if a sensor should be created based on available data."""
     if description.always_create:
         return True
-    return description.key in data
+    return (description.source_key or description.key) in data
+
+
+def _asic_temp(data: dict[str, Any], idx: int) -> Any:
+    """Return the temperature of the ASIC at idx from the asicTemps array."""
+    temps = data.get("asicTemps", [])
+    return temps[idx] if len(temps) > idx else None
+
+
+def _asic_stat(data: dict[str, Any], idx: int, field: str) -> Any:
+    """Return a hashrateMonitor field for the ASIC at idx."""
+    asics = data.get("hashrateMonitor", {}).get("asics", [])
+    return asics[idx].get(field) if len(asics) > idx else None
 
 
 async def async_setup_entry(
@@ -437,7 +502,7 @@ async def async_setup_entry(
     coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
 
-    entities: list[BitaxeSensor] = []
+    entities: list[SensorEntity] = []
 
     # Add sensors only if their key exists in the data (auto-detection)
     for description in SENSOR_DESCRIPTIONS:
@@ -456,11 +521,7 @@ async def async_setup_entry(
                     native_unit_of_measurement=UnitOfTemperature.CELSIUS,
                     device_class=SensorDeviceClass.TEMPERATURE,
                     state_class=SensorStateClass.MEASUREMENT,
-                    value_fn=lambda d, idx=i: (
-                        d.get("asicTemps", [])[idx]
-                        if len(d.get("asicTemps", [])) > idx
-                        else None
-                    ),
+                    value_fn=partial(_asic_temp, idx=i),
                     icon="mdi:thermometer",
                 ),
                 entry,
@@ -470,7 +531,7 @@ async def async_setup_entry(
     # Dynamically create per-ASIC hash rate sensors from hashrateMonitor
     hashrate_monitor = data.get("hashrateMonitor", {})
     asics = hashrate_monitor.get("asics", [])
-    for i, asic_data in enumerate(asics):
+    for i in range(len(asics)):
         # Total hash rate for this ASIC
         entities.append(
             BitaxeSensor(
@@ -480,11 +541,7 @@ async def async_setup_entry(
                     name=f"ASIC {i + 1} Hash Rate",
                     native_unit_of_measurement="GH/s",
                     state_class=SensorStateClass.MEASUREMENT,
-                    value_fn=lambda d, idx=i: (
-                        d.get("hashrateMonitor", {}).get("asics", [])[idx].get("total")
-                        if len(d.get("hashrateMonitor", {}).get("asics", [])) > idx
-                        else None
-                    ),
+                    value_fn=partial(_asic_stat, idx=i, field="total"),
                     icon="mdi:speedometer",
                 ),
                 entry,
@@ -498,13 +555,7 @@ async def async_setup_entry(
                     key=f"asic{i + 1}_errors",
                     name=f"ASIC {i + 1} Errors",
                     state_class=SensorStateClass.TOTAL_INCREASING,
-                    value_fn=lambda d, idx=i: (
-                        d.get("hashrateMonitor", {})
-                        .get("asics", [])[idx]
-                        .get("errorCount")
-                        if len(d.get("hashrateMonitor", {}).get("asics", [])) > idx
-                        else None
-                    ),
+                    value_fn=partial(_asic_stat, idx=i, field="errorCount"),
                     icon="mdi:alert-circle",
                 ),
                 entry,
@@ -581,7 +632,7 @@ class BitaxeEnergySensor(
             "sw_version": coordinator.data.get("version", "Unknown"),
         }
         self._energy_kwh: float = 0.0
-        self._last_update = None
+        self._last_update: datetime | None = None
         self._last_power: float | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -603,7 +654,13 @@ class BitaxeEnergySensor(
         """Integrate the latest power reading into the running energy total."""
         data = self.coordinator.data
         now = dt_util.utcnow()
-        power = data.get("power") if data else None
+        # After a failed update the coordinator keeps stale data; drop the reading
+        # so the outage is not integrated as if the miner kept drawing power
+        power = (
+            data.get("power")
+            if data and self.coordinator.last_update_success
+            else None
+        )
 
         if (
             power is not None
