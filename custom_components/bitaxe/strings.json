@@ -3,9 +3,16 @@
         "step": {
             "user": {
                 "title": "Bitaxe Monitor",
-                "description": "Enter the IP address of your Bitaxe miner",
+                "description": "Enter the IP address or hostname of your Bitaxe miner. Append :port if the web interface does not use port 80.",
                 "data": {
-                    "host": "IP Address"
+                    "host": "IP address or hostname"
+                }
+            },
+            "reconfigure": {
+                "title": "Change miner address",
+                "description": "Enter the new IP address or hostname of your Bitaxe miner. Append :port if the web interface does not use port 80.",
+                "data": {
+                    "host": "IP address or hostname"
                 }
             }
         },
@@ -14,7 +21,8 @@
             "unknown": "An unknown error occurred. Please try again."
         },
         "abort": {
-            "already_configured": "This Bitaxe miner is already configured."
+            "already_configured": "This Bitaxe miner is already configured.",
+            "reconfigure_successful": "The miner address was updated."
         }
     }
 }

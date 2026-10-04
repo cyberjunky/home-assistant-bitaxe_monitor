@@ -64,3 +64,35 @@ class BitaxeConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle changing the address of an existing miner."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            try:
+                await validate_input(self.hass, user_input)
+            except BitaxeApiError:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                # The host is the unique ID, so move it along with the new address
+                await self.async_set_unique_id(user_input[CONF_HOST])
+                if entry.unique_id != user_input[CONF_HOST]:
+                    self._abort_if_unique_id_configured()
+                return self.async_update_reload_and_abort(
+                    entry, unique_id=user_input[CONF_HOST], data_updates=user_input
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_USER_DATA_SCHEMA, user_input or entry.data
+            ),
+            errors=errors,
+        )
