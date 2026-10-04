@@ -157,6 +157,10 @@ The integration will automatically:
 - Retrieve firmware version
 - Create sensors for all available metrics
 
+### Changing the Address
+
+If your miner gets a new IP address, open the integration, click the three-dot menu of the miner and choose **Reconfigure**. Entities and history are kept. Append `:port` to the address if the web interface does not use port 80.
+
 ### Multiple Devices
 
 You can add multiple BitAxe devices by repeating the setup process for each miner. Each device will appear as a separate device in Home Assistant with its own set of sensors.
