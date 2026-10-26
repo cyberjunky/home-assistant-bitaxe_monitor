@@ -112,6 +112,14 @@ The integration **automatically detects** which sensors are available on your sp
 | Overheat Mode | Thermal protection status | Normal/Active |
 | Overclock | Overclock status | Enabled/Disabled |
 
+### Controls
+
+| Entity | Description |
+|--------|-------------|
+| Mining | Pauses (off) and resumes (on) mining without powering off the miner, e.g. to only mine when solar power is available |
+
+The switch is only created when the firmware reports its paused state (`miningPaused`).
+
 ### Firmware Update
 
 | Entity | Description |
