@@ -507,7 +507,6 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.get("freeHeap"),
         icon="mdi:memory",
-        entity_registry_enabled_default=False,
     ),
     BitaxeSensorEntityDescription(
         key="lastResetReason",

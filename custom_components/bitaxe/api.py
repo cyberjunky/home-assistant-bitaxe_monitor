@@ -50,7 +50,7 @@ class BitaxeApiClient:
                             raise ValueError(f"Expected dict, got {type(data)}")
                         return data
                     except json.JSONDecodeError as err:
-                        _LOGGER.error(
+                        _LOGGER.debug(
                             "Invalid JSON from %s. Content-Type: %s, Response: %s",
                             url,
                             response.content_type,
@@ -59,16 +59,16 @@ class BitaxeApiClient:
                         raise BitaxeApiError(f"Invalid JSON response from {url}: {err}") from err
 
         except TimeoutError as err:
-            _LOGGER.error("Timeout fetching data from %s after 10 seconds", url)
+            _LOGGER.debug("Timeout fetching data from %s after 10 seconds", url)
             raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
         except aiohttp.ClientConnectionError as err:
-            _LOGGER.error("Connection error to %s: %s", url, err)
+            _LOGGER.debug("Connection error to %s: %s", url, err)
             raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
         except aiohttp.ClientResponseError as err:
-            _LOGGER.error("HTTP %s error from %s: %s", err.status, url, err)
+            _LOGGER.debug("HTTP %s error from %s: %s", err.status, url, err)
             raise BitaxeApiError(f"HTTP {err.status} error from {url}") from err
         except aiohttp.ClientError as err:
-            _LOGGER.error("HTTP client error from %s: %s", url, err)
+            _LOGGER.debug("HTTP client error from %s: %s", url, err)
             raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
 
     async def async_post(self, endpoint: str) -> None:
@@ -79,16 +79,16 @@ class BitaxeApiClient:
                 async with self.session.post(url, allow_redirects=False) as response:
                     response.raise_for_status()
         except TimeoutError as err:
-            _LOGGER.error("Timeout posting to %s after 10 seconds", url)
+            _LOGGER.debug("Timeout posting to %s after 10 seconds", url)
             raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
         except aiohttp.ClientConnectionError as err:
-            _LOGGER.error("Connection error to %s: %s", url, err)
+            _LOGGER.debug("Connection error to %s: %s", url, err)
             raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
         except aiohttp.ClientResponseError as err:
-            _LOGGER.error("HTTP %s error from %s: %s", err.status, url, err)
+            _LOGGER.debug("HTTP %s error from %s: %s", err.status, url, err)
             raise BitaxeApiError(f"HTTP {err.status} error from {url}") from err
         except aiohttp.ClientError as err:
-            _LOGGER.error("HTTP client error from %s: %s", url, err)
+            _LOGGER.debug("HTTP client error from %s: %s", url, err)
             raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
 
     async def async_pause_mining(self) -> None:

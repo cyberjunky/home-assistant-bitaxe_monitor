@@ -75,6 +75,8 @@ class BitaxeMiningSwitch(CoordinatorEntity[BitaxeDataUpdateCoordinator], SwitchE
                 await self.coordinator.client.async_resume_mining()
             else:
                 await self.coordinator.client.async_restart()
+                # The device is rebooting; the next regular poll picks up its state
+                return
         except BitaxeApiError as err:
             raise HomeAssistantError(f"Failed to resume mining: {err}") from err
         await self.coordinator.async_request_refresh()
