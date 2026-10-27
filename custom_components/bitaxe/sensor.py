@@ -81,6 +81,8 @@ class BitaxeSensorEntityDescription(SensorEntityDescription):
     always_create: bool = False
     # API key that must be present for the sensor to be created (defaults to key)
     source_key: str | None = None
+    # Custom check whether the sensor should be created (overrides source_key)
+    exists_fn: Callable[[dict[str, Any]], bool] | None = None
 
 
 # All possible sensor descriptions - only created if the key exists in API data
@@ -181,6 +183,15 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.get("vrTemp"),
+        icon="mdi:thermometer-alert",
+    ),
+    BitaxeSensorEntityDescription(
+        key="vrTempInt",
+        name="VR Internal Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get("vrTempInt"),
         icon="mdi:thermometer-alert",
     ),
     BitaxeSensorEntityDescription(
@@ -365,6 +376,13 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         value_fn=lambda data: data.get("foundBlocks"),
         icon="mdi:cube",
     ),
+    BitaxeSensorEntityDescription(
+        key="totalFoundBlocks",
+        name="Total Blocks Found",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda data: data.get("totalFoundBlocks"),
+        icon="mdi:cube-outline",
+    ),
     # ==========================================================================
     # Fan & Cooling
     # ==========================================================================
@@ -384,12 +402,23 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         value_fn=lambda data: data.get("fanrpm"),
         icon="mdi:fan",
     ),
+    # AxeOS reports fan2rpm, NerdQAxe fanrpm2/fanspeed2 (zero without a second fan)
     BitaxeSensorEntityDescription(
         key="fan2rpm",
         name="Fan 2 RPM",
         native_unit_of_measurement="RPM",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("fan2rpm"),
+        value_fn=lambda data: data.get("fan2rpm", data.get("fanrpm2")),
+        exists_fn=lambda data: "fan2rpm" in data or data.get("fanCount", 0) > 1,
+        icon="mdi:fan",
+    ),
+    BitaxeSensorEntityDescription(
+        key="fanspeed2",
+        name="Fan 2 Speed",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get("fanspeed2"),
+        exists_fn=lambda data: data.get("fanCount", 0) > 1,
         icon="mdi:fan",
     ),
     BitaxeSensorEntityDescription(
@@ -435,6 +464,29 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         value_fn=lambda data: data.get("responseTime"),
         icon="mdi:timer-outline",
     ),
+    BitaxeSensorEntityDescription(
+        key="lastpingrtt",
+        name="Pool Ping",
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get("lastpingrtt"),
+        icon="mdi:timer-outline",
+    ),
+    BitaxeSensorEntityDescription(
+        key="recentpingloss",
+        name="Pool Ping Loss",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        # Reported as a fraction (0-1)
+        value_fn=lambda data: (
+            round(data["recentpingloss"] * 100, 1)
+            if data.get("recentpingloss") is not None
+            else None
+        ),
+        icon="mdi:lan-disconnect",
+    ),
     # ==========================================================================
     # System Status
     # ==========================================================================
@@ -458,6 +510,26 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     BitaxeSensorEntityDescription(
+        key="lastResetReason",
+        name="Last Reset Reason",
+        # AxeOS reports resetReason as text, NerdQAxe lastResetReason as a UI
+        # translation key like SYSTEM.RESET_POWERON
+        value_fn=lambda data: (
+            str(data["lastResetReason"]).removeprefix("SYSTEM.RESET_")
+            if data.get("lastResetReason") is not None
+            else data.get("resetReason")
+        ),
+        exists_fn=lambda data: "lastResetReason" in data or "resetReason" in data,
+        icon="mdi:restart-alert",
+    ),
+    BitaxeSensorEntityDescription(
+        key="duplicateHWNonces",
+        name="Duplicate HW Nonces",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda data: data.get("duplicateHWNonces"),
+        icon="mdi:content-duplicate",
+    ),
+    BitaxeSensorEntityDescription(
         key="overheat_mode",
         name="Overheat Mode",
         value_fn=lambda data: "Active" if data.get("overheat_mode") else "Normal",
@@ -478,6 +550,8 @@ def _should_create_sensor(
     """Determine if a sensor should be created based on available data."""
     if description.always_create:
         return True
+    if description.exists_fn is not None:
+        return description.exists_fn(data)
     return (description.source_key or description.key) in data
 
 
@@ -491,6 +565,21 @@ def _asic_stat(data: dict[str, Any], idx: int, field: str) -> Any:
     """Return a hashrateMonitor field for the ASIC at idx."""
     asics = data.get("hashrateMonitor", {}).get("asics", [])
     return asics[idx].get(field) if len(asics) > idx else None
+
+
+def _chip_stat(data: dict[str, Any], idx: int, field: str) -> Any:
+    """Return a NerdQAxe dashboard chips field for the ASIC at idx."""
+    chips = data.get("chips", [])
+    return chips[idx].get(field) if len(chips) > idx else None
+
+
+def _chip_hashrate(data: dict[str, Any], idx: int) -> Any:
+    """Return the total hash rate of the ASIC at idx, including errors."""
+    valid = _chip_stat(data, idx, "hashRate")
+    errors = _chip_stat(data, idx, "errorHashRate")
+    if valid is None:
+        return None
+    return round(valid + (errors or 0), 2)
 
 
 async def async_setup_entry(
@@ -556,6 +645,38 @@ async def async_setup_entry(
                     name=f"ASIC {i + 1} Errors",
                     state_class=SensorStateClass.TOTAL_INCREASING,
                     value_fn=partial(_asic_stat, idx=i, field="errorCount"),
+                    icon="mdi:alert-circle",
+                ),
+                entry,
+            )
+        )
+
+    # Dynamically create per-ASIC hash rate sensors from the NerdQAxe v2 dashboard
+    chips = data.get("chips", [])
+    for i in range(len(chips)):
+        entities.append(
+            BitaxeSensor(
+                coordinator,
+                BitaxeSensorEntityDescription(
+                    key=f"asic{i + 1}_hashrate",
+                    name=f"ASIC {i + 1} Hash Rate",
+                    native_unit_of_measurement="GH/s",
+                    state_class=SensorStateClass.MEASUREMENT,
+                    value_fn=partial(_chip_hashrate, idx=i),
+                    icon="mdi:speedometer",
+                ),
+                entry,
+            )
+        )
+        entities.append(
+            BitaxeSensor(
+                coordinator,
+                BitaxeSensorEntityDescription(
+                    key=f"asic{i + 1}_error_hashrate",
+                    name=f"ASIC {i + 1} Error Hash Rate",
+                    native_unit_of_measurement="GH/s",
+                    state_class=SensorStateClass.MEASUREMENT,
+                    value_fn=partial(_chip_stat, idx=i, field="errorHashRate"),
                     icon="mdi:alert-circle",
                 ),
                 entry,

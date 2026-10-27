@@ -56,6 +56,7 @@ The integration **automatically detects** which sensors are available on your sp
 | ASIC Temperature | Main chip temperature | °C |
 | ASIC Temperature 2 | Secondary temp sensor (if available) | °C |
 | VR Temperature | Voltage regulator temperature | °C |
+| VR Internal Temperature | Voltage regulator internal temperature (NerdQAxe) | °C |
 | Target Temperature | Fan control target temperature | °C |
 | ASIC N Temperature | Individual ASIC temps (multi-chip units) | °C |
 
@@ -69,7 +70,8 @@ The integration **automatically detects** which sensors are available on your sp
 | Hash Rate (1h avg) | 1-hour average | GH/s |
 | Hash Rate (1d avg) | 1-day average | GH/s |
 | Expected Hash Rate | Target hash rate | GH/s |
-| ASIC N Hash Rate | Per-ASIC hash rate (multi-chip units) | GH/s |
+| ASIC N Hash Rate | Per-ASIC hash rate (multi-chip units; NerdQAxe needs firmware v1.1.1+) | GH/s |
+| ASIC N Error Hash Rate | Per-ASIC hash rate lost to hardware errors (NerdQAxe v1.1.1+) | GH/s |
 | ASIC Frequency | Mining chip frequency | MHz |
 | ASIC Core Count | Number of mining cores | - |
 | Error Rate | Percentage of errors | % |
@@ -89,6 +91,7 @@ The integration **automatically detects** which sensors are available on your sp
 | Shares Accepted | Total accepted shares |
 | Shares Rejected | Total rejected shares |
 | Blocks Found | Number of blocks found |
+| Total Blocks Found | All-time number of blocks found (NerdQAxe) |
 
 ### Fan & Cooling
 
@@ -97,6 +100,7 @@ The integration **automatically detects** which sensors are available on your sp
 | Fan Speed | Current fan speed | % |
 | Fan RPM | Fan revolutions per minute | RPM |
 | Fan 2 RPM | Second fan (if available) | RPM |
+| Fan 2 Speed | Second fan speed (NerdQAxe, if available) | % |
 | Auto Fan Speed | Auto fan control status | On/Off |
 | Manual Fan Speed | Manual fan speed setting | % |
 | Minimum Fan Speed | Minimum fan speed limit | % |
@@ -107,18 +111,30 @@ The integration **automatically detects** which sensors are available on your sp
 |--------|-------------|------|
 | WiFi Signal | WiFi signal strength | dBm |
 | Pool Response Time | Pool latency | ms |
+| Pool Ping | Last ping round trip to the pool (NerdQAxe) | ms |
+| Pool Ping Loss | Recent ping packet loss to the pool (NerdQAxe) | % |
 | Uptime | Device uptime | seconds |
 | Free Memory | Available heap memory | B |
 | Overheat Mode | Thermal protection status | Normal/Active |
 | Overclock | Overclock status | Enabled/Disabled |
+| Last Reset Reason | Why the device last rebooted, e.g. power-on or a crash | |
+| Duplicate HW Nonces | Duplicate nonces returned by the ASICs, a hardware health indicator (NerdQAxe) | |
+
+### Binary Sensors
+
+| Sensor | Description |
+|--------|-------------|
+| Pool Connected | Whether the miner is connected to its pool (both pools in dual pool mode) (NerdQAxe) |
+| Using Fallback Pool | Whether the miner switched to the fallback pool |
 
 ### Controls
 
 | Entity | Description |
 |--------|-------------|
 | Mining | Pauses (off) and resumes (on) mining without powering off the miner, e.g. to only mine when solar power is available |
+| Restart | Restarts the miner |
 
-The switch is only created when the firmware reports its paused state (`miningPaused`).
+The switch is only created when the firmware reports its mining state. AxeOS pauses and resumes mining in place (`miningPaused`). NerdQAxe firmware has no pause, so turning the switch off shuts down the ASICs (`shutdown`) and turning it on restarts the device, which takes a few seconds.
 
 ### Firmware Update
 
