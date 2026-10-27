@@ -99,6 +99,31 @@ class BitaxeApiClient:
         """Resume mining."""
         await self.async_post("/api/system/resume")
 
+    async def async_shutdown(self) -> None:
+        """Shut down the ASICs (NerdQAxe firmware)."""
+        await self.async_post("/api/system/shutdown")
+
+    async def async_restart(self) -> None:
+        """Restart the device."""
+        await self.async_post("/api/system/restart")
+
+    async def async_get_dashboard(self) -> dict | None:
+        """Get the NerdQAxe v2 dashboard, or None if the firmware lacks it."""
+        url = f"{self._base_url}/api/v2/dashboard"
+        try:
+            async with asyncio.timeout(10):
+                async with self.session.get(url, allow_redirects=False) as response:
+                    # Unknown endpoints redirect to the captive portal
+                    if response.status != 200 or response.content_type != "application/json":
+                        _LOGGER.debug("No v2 dashboard at %s (HTTP %s)", url, response.status)
+                        return None
+                    data = await response.json()
+        except TimeoutError as err:
+            raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
+        except (aiohttp.ClientError, ValueError) as err:
+            raise BitaxeConnectionError(f"Error fetching {url}: {err}") from err
+        return data if isinstance(data, dict) else None
+
     async def async_get_system_info(self) -> dict:
         """Get system information - used for validation during setup."""
         return await self.async_get_data("/api/system/info")
