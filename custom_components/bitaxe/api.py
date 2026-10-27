@@ -71,6 +71,34 @@ class BitaxeApiClient:
             _LOGGER.error("HTTP client error from %s: %s", url, err)
             raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
 
+    async def async_post(self, endpoint: str) -> None:
+        """Send a command to the API."""
+        url = f"{self._base_url}{endpoint}"
+        try:
+            async with asyncio.timeout(10):
+                async with self.session.post(url, allow_redirects=False) as response:
+                    response.raise_for_status()
+        except TimeoutError as err:
+            _LOGGER.error("Timeout posting to %s after 10 seconds", url)
+            raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
+        except aiohttp.ClientConnectionError as err:
+            _LOGGER.error("Connection error to %s: %s", url, err)
+            raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
+        except aiohttp.ClientResponseError as err:
+            _LOGGER.error("HTTP %s error from %s: %s", err.status, url, err)
+            raise BitaxeApiError(f"HTTP {err.status} error from {url}") from err
+        except aiohttp.ClientError as err:
+            _LOGGER.error("HTTP client error from %s: %s", url, err)
+            raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
+
+    async def async_pause_mining(self) -> None:
+        """Pause mining."""
+        await self.async_post("/api/system/pause")
+
+    async def async_resume_mining(self) -> None:
+        """Resume mining."""
+        await self.async_post("/api/system/resume")
+
     async def async_get_system_info(self) -> dict:
         """Get system information - used for validation during setup."""
         return await self.async_get_data("/api/system/info")
