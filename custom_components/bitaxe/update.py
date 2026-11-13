@@ -1,6 +1,5 @@
 """Update platform for Bitaxe integration."""
 
-from __future__ import annotations
 
 import logging
 from datetime import timedelta
@@ -12,18 +11,14 @@ from homeassistant.components.update import (
     UpdateEntity,
     UpdateEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
-from .coordinator import BitaxeDataUpdateCoordinator
+from .coordinator import BitaxeConfigEntry, BitaxeDataUpdateCoordinator
+from .entity import BitaxeEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,31 +75,28 @@ class BitaxeFirmwareCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: BitaxeConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Bitaxe update entity based on a config entry."""
-    coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    if "version" not in (coordinator.data or {}):
+    coordinator = entry.runtime_data
+    if "version" not in coordinator.snapshot:
         return
 
-    repo = _firmware_repo(coordinator.data)
+    repo = _firmware_repo(coordinator.snapshot)
     firmware_coordinators = hass.data.setdefault(DATA_FIRMWARE, {})
     if (firmware := firmware_coordinators.get(repo)) is None:
         firmware = firmware_coordinators[repo] = BitaxeFirmwareCoordinator(hass, repo)
         # A GitHub outage must not block setup; the entity stays unknown until it recovers
         await firmware.async_refresh()
 
-    async_add_entities([BitaxeFirmwareUpdate(coordinator, firmware, entry)])
+    async_add_entities([BitaxeFirmwareUpdate(coordinator, firmware)])
 
 
-class BitaxeFirmwareUpdate(
-    CoordinatorEntity[BitaxeDataUpdateCoordinator], UpdateEntity
-):
+class BitaxeFirmwareUpdate(BitaxeEntity, UpdateEntity):
     """Firmware update entity, informational only (install through AxeOS)."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Firmware"
+    _attr_translation_key = "firmware"
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_supported_features = UpdateEntityFeature.RELEASE_NOTES
 
@@ -112,27 +104,16 @@ class BitaxeFirmwareUpdate(
         self,
         coordinator: BitaxeDataUpdateCoordinator,
         firmware: BitaxeFirmwareCoordinator,
-        entry: ConfigEntry,
     ) -> None:
         """Initialize the update entity."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, "firmware")
         self._firmware = firmware
-        self._attr_unique_id = f"{entry.entry_id}_firmware"
         self._attr_title = firmware.repo.split("/")[1]
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Bitaxe",
-            "model": coordinator.data.get("ASICModel", "Unknown"),
-            "sw_version": coordinator.data.get("version", "Unknown"),
-        }
 
     async def async_added_to_hass(self) -> None:
         """Also refresh the state when a new release is fetched."""
         await super().async_added_to_hass()
-        self.async_on_remove(
-            self._firmware.async_add_listener(self._handle_coordinator_update)
-        )
+        self.async_on_remove(self._firmware.async_add_listener(self._handle_coordinator_update))
 
     @property
     def installed_version(self) -> str | None:

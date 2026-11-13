@@ -101,7 +101,6 @@ The integration **automatically detects** which sensors are available on your sp
 | Fan RPM | Fan revolutions per minute | RPM |
 | Fan 2 RPM | Second fan (if available) | RPM |
 | Fan 2 Speed | Second fan speed (NerdQAxe, if available) | % |
-| Auto Fan Speed | Auto fan control status | On/Off |
 | Manual Fan Speed | Manual fan speed setting | % |
 | Minimum Fan Speed | Minimum fan speed limit | % |
 
@@ -115,8 +114,6 @@ The integration **automatically detects** which sensors are available on your sp
 | Pool Ping Loss | Recent ping packet loss to the pool (NerdQAxe) | % |
 | Uptime | Device uptime | seconds |
 | Free Memory | Available heap memory | B |
-| Overheat Mode | Thermal protection status | Normal/Active |
-| Overclock | Overclock status | Enabled/Disabled |
 | Last Reset Reason | Why the device last rebooted, e.g. power-on or a crash | |
 | Duplicate HW Nonces | Duplicate nonces returned by the ASICs, a hardware health indicator (NerdQAxe) | |
 
@@ -126,6 +123,9 @@ The integration **automatically detects** which sensors are available on your sp
 |--------|-------------|
 | Pool Connected | Whether the miner is connected to its pool (both pools in dual pool mode) (NerdQAxe) |
 | Using Fallback Pool | Whether the miner switched to the fallback pool |
+| Overheat Mode | On when thermal protection kicked in |
+| Auto Fan Speed | Whether the fan speed is controlled automatically |
+| Overclock | Whether overclocking is enabled |
 
 ### Controls
 
@@ -184,6 +184,12 @@ The integration will automatically:
 ### Changing the Address
 
 If your miner gets a new IP address, open the integration, click the three-dot menu of the miner and choose **Reconfigure**. Entities and history are kept. Append `:port` to the address if the web interface does not use port 80.
+
+### Miners That Are Switched Off
+
+Miners that are switched off now and then, for example to only mine on cheap or solar power, need no special care. Once a miner has been reached, Home Assistant remembers its sensors: when it is off, also while Home Assistant starts, its entities show as unavailable and the log gets a single info message, instead of a failed setup. Everything comes back when the miner is switched on.
+
+A miner has to be on when it is added.
 
 ### Multiple Devices
 
@@ -270,9 +276,13 @@ actions:
 
 ### Sensors Showing Unknown/Unavailable
 
-1. The Bitaxe API may take a moment to return all data after startup
-2. Check the Home Assistant logs for connection errors
+1. All entities are unavailable while the miner is switched off or unreachable; the log shows `... is unreachable, probably switched off`
+2. The Bitaxe API may take a moment to return all data after startup
 3. Verify the device is still reachable on the network
+
+### Diagnostics
+
+When reporting an issue, please attach the diagnostics: open the miner's device page, click the three-dot menu and choose **Download diagnostics**. IP and MAC addresses, the WiFi network name and the pool user (wallet address) are left out.
 
 ### Enable Debug Logging
 

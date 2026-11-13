@@ -1,6 +1,5 @@
 """Binary sensor platform for Bitaxe integration."""
 
-from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,13 +10,12 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
-from .coordinator import BitaxeDataUpdateCoordinator
+from .coordinator import BitaxeConfigEntry, BitaxeDataUpdateCoordinator
+from .entity import BitaxeEntity
 
 
 def _pools(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -36,18 +34,24 @@ def _using_fallback(data: dict[str, Any]) -> bool | None:
     return None
 
 
+def _flag(key: str) -> Callable[[dict[str, Any]], bool | None]:
+    """Return a value function for a boolean or 0/1 API value."""
+    return lambda data: bool(data[key]) if data.get(key) is not None else None
+
+
 @dataclass(frozen=True, kw_only=True)
 class BitaxeBinarySensorEntityDescription(BinarySensorEntityDescription):
     """Describes Bitaxe binary sensor entity."""
 
     value_fn: Callable[[dict[str, Any]], bool | None]
-    exists_fn: Callable[[dict[str, Any]], bool]
+    # Defaults to the entity key being in the data
+    exists_fn: Callable[[dict[str, Any]], bool] | None = None
 
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[BitaxeBinarySensorEntityDescription, ...] = (
     BitaxeBinarySensorEntityDescription(
         key="pool_connected",
-        name="Pool Connected",
+        translation_key="pool_connected",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         # In dual pool mode all pools must be connected
         value_fn=lambda data: (
@@ -57,59 +61,64 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[BitaxeBinarySensorEntityDescription, ...] = (
     ),
     BitaxeBinarySensorEntityDescription(
         key="using_fallback",
-        name="Using Fallback Pool",
-        icon="mdi:swap-horizontal",
+        translation_key="using_fallback",
         value_fn=_using_fallback,
         exists_fn=lambda data: _using_fallback(data) is not None,
+    ),
+    BitaxeBinarySensorEntityDescription(
+        key="overheat_mode",
+        translation_key="overheat",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=_flag("overheat_mode"),
+    ),
+    BitaxeBinarySensorEntityDescription(
+        key="autofanspeed",
+        translation_key="auto_fan_speed",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_flag("autofanspeed"),
+    ),
+    BitaxeBinarySensorEntityDescription(
+        key="overclockEnabled",
+        translation_key="overclock",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_flag("overclockEnabled"),
     ),
 )
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: BitaxeConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Bitaxe binary sensors based on a config entry."""
-    coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    data = coordinator.data or {}
+    coordinator = entry.runtime_data
+    data = coordinator.snapshot
 
     async_add_entities(
-        BitaxeBinarySensor(coordinator, description, entry)
+        BitaxeBinarySensor(coordinator, description)
         for description in BINARY_SENSOR_DESCRIPTIONS
-        if description.exists_fn(data)
+        if (description.exists_fn(data) if description.exists_fn else description.key in data)
     )
 
 
-class BitaxeBinarySensor(
-    CoordinatorEntity[BitaxeDataUpdateCoordinator], BinarySensorEntity
-):
+class BitaxeBinarySensor(BitaxeEntity, BinarySensorEntity):
     """Representation of a Bitaxe binary sensor."""
 
     entity_description: BitaxeBinarySensorEntityDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
         coordinator: BitaxeDataUpdateCoordinator,
         description: BitaxeBinarySensorEntityDescription,
-        entry: ConfigEntry,
     ) -> None:
         """Initialize the binary sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Bitaxe",
-            "model": coordinator.data.get("ASICModel", "Unknown"),
-            "sw_version": coordinator.data.get("version", "Unknown"),
-        }
 
     @property
     def is_on(self) -> bool | None:
         """Return the state of the binary sensor."""
-        if self.coordinator.data is None:
+        if (data := self.coordinator.data) is None:
             return None
-        return self.entity_description.value_fn(self.coordinator.data)
+        return self.entity_description.value_fn(data)

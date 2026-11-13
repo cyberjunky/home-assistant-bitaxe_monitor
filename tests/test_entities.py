@@ -68,16 +68,35 @@ async def test_axeos_sensors(
     assert value("bestDiff_formatted") == "4.29G"
     assert float(value("bestSessionDiff")) == 123456
     assert value("bestSessionDiff_formatted") == "123.46k"
-    assert value("autofanspeed") == "On"
     assert value("asicTemp1") == "52.0"
     assert value("asicTemp2") == "53.5"
     assert value("asic1_hashrate") == "500.25"
     assert value("asic1_errors") == "2"
     assert value("energy") == "0.0"
 
+    assert value("blockFound") == "0"
+
     # Keys the miner does not report are not created
     assert _entity_id(hass, mock_config_entry, "sensor", "temp2") is None
     assert _entity_id(hass, mock_config_entry, "sensor", "fan2rpm") is None
+    # Only one blocks found sensor when the firmware reports both keys
+    assert _entity_id(hass, mock_config_entry, "sensor", "foundBlocks") is None
+
+    # Names come from the translations
+    asic_temp = _state(hass, mock_config_entry, "sensor", "asicTemp2")
+    assert asic_temp.attributes["friendly_name"] == "Bitaxe BM1370 ASIC 2 Temperature"
+
+
+async def test_current_zero(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """A current of 0 mA is reported as 0 A, not unknown."""
+    mock_api(aioclient_mock, {"power": 0.0, "current": 0})
+    await _setup(hass, mock_config_entry)
+
+    assert _state(hass, mock_config_entry, "sensor", "current").state == "0.0"
 
 
 async def test_axeos_binary_sensors(
@@ -90,7 +109,10 @@ async def test_axeos_binary_sensors(
     await _setup(hass, mock_config_entry)
 
     assert _state(hass, mock_config_entry, "binary_sensor", "using_fallback").state == STATE_OFF
+    assert _state(hass, mock_config_entry, "binary_sensor", "autofanspeed").state == STATE_ON
+    assert _state(hass, mock_config_entry, "binary_sensor", "overheat_mode").state == STATE_OFF
     assert _entity_id(hass, mock_config_entry, "binary_sensor", "pool_connected") is None
+    assert _entity_id(hass, mock_config_entry, "binary_sensor", "overclockEnabled") is None
 
 
 async def test_axeos_mining_switch(
@@ -104,8 +126,8 @@ async def test_axeos_mining_switch(
     aioclient_mock.post(f"{BASE_URL}/api/system/resume")
     await _setup(hass, mock_config_entry)
 
-    entity_id = _entity_id(hass, mock_config_entry, "switch", "mining")
-    assert hass.states.get(entity_id).state == STATE_ON
+    entity_id = _state(hass, mock_config_entry, "switch", "mining").entity_id
+    assert hass.states.is_state(entity_id, STATE_ON)
 
     await hass.services.async_call("switch", "turn_off", {ATTR_ENTITY_ID: entity_id}, blocking=True)
     await hass.services.async_call("switch", "turn_on", {ATTR_ENTITY_ID: entity_id}, blocking=True)
@@ -223,8 +245,8 @@ async def test_nerdqaxe_entities(
     assert update.attributes["latest_version"] == "v1.0.31"
 
     # Without pause support the switch shuts down the ASICs and restarts to resume
-    entity_id = _entity_id(hass, mock_config_entry, "switch", "mining")
-    assert hass.states.get(entity_id).state == STATE_ON
+    entity_id = _state(hass, mock_config_entry, "switch", "mining").entity_id
+    assert hass.states.is_state(entity_id, STATE_ON)
     await hass.services.async_call("switch", "turn_off", {ATTR_ENTITY_ID: entity_id}, blocking=True)
     await hass.services.async_call("switch", "turn_on", {ATTR_ENTITY_ID: entity_id}, blocking=True)
     posted = [str(url) for method, url, _, _ in aioclient_mock.mock_calls if method == "POST"]
@@ -256,7 +278,7 @@ async def test_no_switch_or_update_without_data(
 
     assert _entity_id(hass, mock_config_entry, "switch", "mining") is None
     assert _entity_id(hass, mock_config_entry, "update", "firmware") is None
-    # Efficiency is always created but unknown without a hash rate
+    # Efficiency is unknown without a hash rate
     assert _state(hass, mock_config_entry, "sensor", "efficiency").state == STATE_UNKNOWN
 
 
@@ -269,7 +291,7 @@ async def test_energy_sensor_integrates_power(
     """The energy sensor integrates power over time and skips failed updates."""
     mock_api(aioclient_mock, {"power": 20.0})
     await _setup(hass, mock_config_entry)
-    coordinator = hass.data[DOMAIN][mock_config_entry.entry_id]
+    coordinator = mock_config_entry.runtime_data
 
     # The first reading only sets the baseline
     await coordinator.async_refresh()
@@ -311,4 +333,4 @@ async def test_energy_sensor_restores_state(
     assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
-    assert hass.states.get("sensor.bitaxe_energy").state == "1.234"
+    assert hass.states.is_state("sensor.bitaxe_energy", "1.234")

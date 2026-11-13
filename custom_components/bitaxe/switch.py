@@ -1,58 +1,43 @@
 """Switch platform for Bitaxe integration."""
 
-from __future__ import annotations
 
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import BitaxeApiError
 from .const import DOMAIN
-from .coordinator import BitaxeDataUpdateCoordinator
+from .coordinator import BitaxeConfigEntry, BitaxeDataUpdateCoordinator
+from .entity import BitaxeEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: BitaxeConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Bitaxe switch entities based on a config entry."""
-    coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    data = coordinator.data or {}
+    coordinator = entry.runtime_data
     # AxeOS supports pause/resume and reports miningPaused. NerdQAxe firmware
     # can only shut down the ASICs (reported as shutdown) and needs a restart
     # to resume mining.
-    if "miningPaused" not in data and "shutdown" not in data:
+    if "miningPaused" not in coordinator.snapshot and "shutdown" not in coordinator.snapshot:
         return
 
-    async_add_entities([BitaxeMiningSwitch(coordinator, entry)])
+    async_add_entities([BitaxeMiningSwitch(coordinator)])
 
 
-class BitaxeMiningSwitch(CoordinatorEntity[BitaxeDataUpdateCoordinator], SwitchEntity):
+class BitaxeMiningSwitch(BitaxeEntity, SwitchEntity):
     """Switch to pause and resume mining."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Mining"
-    _attr_icon = "mdi:pickaxe"
+    _attr_translation_key = "mining"
 
-    def __init__(
-        self, coordinator: BitaxeDataUpdateCoordinator, entry: ConfigEntry
-    ) -> None:
+    def __init__(self, coordinator: BitaxeDataUpdateCoordinator) -> None:
         """Initialize the switch."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_mining"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Bitaxe",
-            "model": coordinator.data.get("ASICModel", "Unknown"),
-            "sw_version": coordinator.data.get("version", "Unknown"),
-        }
+        super().__init__(coordinator, "mining")
 
     @property
     def _supports_pause(self) -> bool:
@@ -75,8 +60,14 @@ class BitaxeMiningSwitch(CoordinatorEntity[BitaxeDataUpdateCoordinator], SwitchE
                 await self.coordinator.client.async_resume_mining()
             else:
                 await self.coordinator.client.async_restart()
+                # The device is rebooting; the next regular poll picks up its state
+                return
         except BitaxeApiError as err:
-            raise HomeAssistantError(f"Failed to resume mining: {err}") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="resume_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -87,5 +78,9 @@ class BitaxeMiningSwitch(CoordinatorEntity[BitaxeDataUpdateCoordinator], SwitchE
             else:
                 await self.coordinator.client.async_shutdown()
         except BitaxeApiError as err:
-            raise HomeAssistantError(f"Failed to pause mining: {err}") from err
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pause_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
         await self.coordinator.async_request_refresh()
