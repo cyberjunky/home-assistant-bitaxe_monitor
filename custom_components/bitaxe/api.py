@@ -1,11 +1,15 @@
 """API client for Bitaxe miner."""
+
 import asyncio
 import json
 import logging
+from typing import Any
 
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
+
+REQUEST_TIMEOUT = 10
 
 
 class BitaxeApiError(Exception):
@@ -16,7 +20,7 @@ class BitaxeConnectionError(BitaxeApiError):
     """Exception for connection errors."""
 
 
-class BitaxeTimeoutError(BitaxeApiError):
+class BitaxeTimeoutError(BitaxeConnectionError):
     """Exception for timeout errors."""
 
 
@@ -29,67 +33,53 @@ class BitaxeApiClient:
         self.session = session
         self._base_url = f"http://{host}"
 
-    async def async_get_data(self, endpoint: str) -> dict:
-        """Get data from the API."""
+    async def _async_request(self, method: str, endpoint: str) -> tuple[int, str | None, str]:
+        """Send a request and return the status, content type and body."""
         url = f"{self._base_url}{endpoint}"
         try:
-            async with asyncio.timeout(10):
-                async with self.session.get(url, allow_redirects=False) as response:
-                    response.raise_for_status()
-
-                    # Get response text first for debugging
-                    text = await response.text()
-
-                    # Log first 200 chars for debugging
-                    _LOGGER.debug("Response from %s (first 200 chars): %s", url, text[:200])
-
-                    # Try to parse as JSON
-                    try:
-                        data = json.loads(text)
-                        if not isinstance(data, dict):
-                            raise ValueError(f"Expected dict, got {type(data)}")
-                        return data
-                    except json.JSONDecodeError as err:
-                        _LOGGER.error(
-                            "Invalid JSON from %s. Content-Type: %s, Response: %s",
-                            url,
-                            response.content_type,
-                            text[:500]
-                        )
-                        raise BitaxeApiError(f"Invalid JSON response from {url}: {err}") from err
-
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                async with self.session.request(method, url, allow_redirects=False) as response:
+                    text = await response.text(errors="replace")
+                    return response.status, response.content_type, text
         except TimeoutError as err:
-            _LOGGER.error("Timeout fetching data from %s after 10 seconds", url)
+            _LOGGER.debug("Timeout on %s %s", method, url)
             raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
-        except aiohttp.ClientConnectionError as err:
-            _LOGGER.error("Connection error to %s: %s", url, err)
-            raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
-        except aiohttp.ClientResponseError as err:
-            _LOGGER.error("HTTP %s error from %s: %s", err.status, url, err)
-            raise BitaxeApiError(f"HTTP {err.status} error from {url}") from err
         except aiohttp.ClientError as err:
-            _LOGGER.error("HTTP client error from %s: %s", url, err)
-            raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
+            _LOGGER.debug("Error on %s %s: %s", method, url, err)
+            raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
+
+    async def async_get_data(self, endpoint: str) -> dict[str, Any]:
+        """Get a JSON object from the API."""
+        status, content_type, text = await self._async_request("GET", endpoint)
+        _LOGGER.debug("Response from %s (first 200 chars): %s", endpoint, text[:200])
+        if status != 200:
+            raise BitaxeApiError(f"HTTP {status} error from {endpoint}")
+        return self._parse_object(endpoint, content_type, text)
 
     async def async_post(self, endpoint: str) -> None:
         """Send a command to the API."""
-        url = f"{self._base_url}{endpoint}"
+        status, _, _ = await self._async_request("POST", endpoint)
+        if status >= 400:
+            raise BitaxeApiError(f"HTTP {status} error from {endpoint}")
+
+    @staticmethod
+    def _parse_object(endpoint: str, content_type: str | None, text: str) -> dict[str, Any]:
+        """Parse a response body that must contain a JSON object."""
         try:
-            async with asyncio.timeout(10):
-                async with self.session.post(url, allow_redirects=False) as response:
-                    response.raise_for_status()
-        except TimeoutError as err:
-            _LOGGER.error("Timeout posting to %s after 10 seconds", url)
-            raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
-        except aiohttp.ClientConnectionError as err:
-            _LOGGER.error("Connection error to %s: %s", url, err)
-            raise BitaxeConnectionError(f"Cannot connect to {self.host}: {err}") from err
-        except aiohttp.ClientResponseError as err:
-            _LOGGER.error("HTTP %s error from %s: %s", err.status, url, err)
-            raise BitaxeApiError(f"HTTP {err.status} error from {url}") from err
-        except aiohttp.ClientError as err:
-            _LOGGER.error("HTTP client error from %s: %s", url, err)
-            raise BitaxeConnectionError(f"HTTP error connecting to {self.host}: {err}") from err
+            data = json.loads(text)
+        except json.JSONDecodeError as err:
+            _LOGGER.debug(
+                "Invalid JSON from %s. Content-Type: %s, Response: %s",
+                endpoint,
+                content_type,
+                text[:500],
+            )
+            raise BitaxeApiError(f"Invalid JSON response from {endpoint}: {err}") from err
+        if not isinstance(data, dict):
+            raise BitaxeApiError(
+                f"Expected a JSON object from {endpoint}, got {type(data).__name__}"
+            )
+        return data
 
     async def async_pause_mining(self) -> None:
         """Pause mining."""
@@ -107,27 +97,26 @@ class BitaxeApiClient:
         """Restart the device."""
         await self.async_post("/api/system/restart")
 
-    async def async_get_dashboard(self) -> dict | None:
-        """Get the NerdQAxe v2 dashboard, or None if the firmware lacks it."""
-        url = f"{self._base_url}/api/v2/dashboard"
-        try:
-            async with asyncio.timeout(10):
-                async with self.session.get(url, allow_redirects=False) as response:
-                    # Unknown endpoints redirect to the captive portal
-                    if response.status != 200 or response.content_type != "application/json":
-                        _LOGGER.debug("No v2 dashboard at %s (HTTP %s)", url, response.status)
-                        return None
-                    data = await response.json()
-        except TimeoutError as err:
-            raise BitaxeTimeoutError(f"Timeout connecting to {self.host}") from err
-        except (aiohttp.ClientError, ValueError) as err:
-            raise BitaxeConnectionError(f"Error fetching {url}: {err}") from err
-        return data if isinstance(data, dict) else None
+    async def async_get_dashboard(self) -> dict[str, Any] | None:
+        """Get the NerdQAxe v2 dashboard, or None if the firmware lacks it.
 
-    async def async_get_system_info(self) -> dict:
-        """Get system information - used for validation during setup."""
-        return await self.async_get_data("/api/system/info")
+        Raises BitaxeApiError for errors that may be temporary, so the caller
+        only gives up on the dashboard when the firmware really lacks it.
+        """
+        endpoint = "/api/v2/dashboard"
+        status, content_type, text = await self._async_request("GET", endpoint)
+        # Unknown endpoints redirect to the captive portal or serve the web UI
+        if (
+            300 <= status < 400
+            or status == 404
+            or (status == 200 and content_type != "application/json")
+        ):
+            _LOGGER.debug("No v2 dashboard at %s (HTTP %s)", endpoint, status)
+            return None
+        if status != 200:
+            raise BitaxeApiError(f"HTTP {status} error from {endpoint}")
+        return self._parse_object(endpoint, content_type, text)
 
-    async def async_get_status(self) -> dict:
-        """Get mining status - AxeOS returns all data from /api/system/info."""
+    async def async_get_system_info(self) -> dict[str, Any]:
+        """Get system information, which includes all mining data on AxeOS."""
         return await self.async_get_data("/api/system/info")

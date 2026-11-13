@@ -22,7 +22,211 @@
         },
         "abort": {
             "already_configured": "This Bitaxe miner is already configured.",
-            "reconfigure_successful": "The miner address was updated."
+            "reconfigure_successful": "The miner address was updated.",
+            "wrong_device": "The address belongs to a different miner. Add that miner as a new device instead."
+        }
+    },
+    "entity": {
+        "binary_sensor": {
+            "pool_connected": {
+                "name": "Pool Connected"
+            },
+            "using_fallback": {
+                "name": "Using Fallback Pool"
+            },
+            "overheat": {
+                "name": "Overheat Mode"
+            },
+            "auto_fan_speed": {
+                "name": "Auto Fan Speed"
+            },
+            "overclock": {
+                "name": "Overclock"
+            }
+        },
+        "button": {
+            "restart": {
+                "name": "Restart"
+            }
+        },
+        "switch": {
+            "mining": {
+                "name": "Mining"
+            }
+        },
+        "update": {
+            "firmware": {
+                "name": "Firmware"
+            }
+        },
+        "sensor": {
+            "power": {
+                "name": "Power"
+            },
+            "max_power": {
+                "name": "Max Power Limit"
+            },
+            "input_voltage": {
+                "name": "Input Voltage"
+            },
+            "nominal_voltage": {
+                "name": "Nominal Voltage"
+            },
+            "current": {
+                "name": "Current"
+            },
+            "core_voltage_target": {
+                "name": "Core Voltage Target"
+            },
+            "core_voltage_actual": {
+                "name": "Core Voltage Actual"
+            },
+            "asic_temperature": {
+                "name": "ASIC Temperature"
+            },
+            "asic_temperature_2": {
+                "name": "ASIC Temperature 2"
+            },
+            "vr_temperature": {
+                "name": "VR Temperature"
+            },
+            "vr_internal_temperature": {
+                "name": "VR Internal Temperature"
+            },
+            "target_temperature": {
+                "name": "Target Temperature"
+            },
+            "hash_rate": {
+                "name": "Hash Rate"
+            },
+            "hash_rate_1m": {
+                "name": "Hash Rate (1m avg)"
+            },
+            "hash_rate_10m": {
+                "name": "Hash Rate (10m avg)"
+            },
+            "hash_rate_1h": {
+                "name": "Hash Rate (1h avg)"
+            },
+            "hash_rate_1d": {
+                "name": "Hash Rate (1d avg)"
+            },
+            "expected_hash_rate": {
+                "name": "Expected Hash Rate"
+            },
+            "asic_frequency": {
+                "name": "ASIC Frequency"
+            },
+            "asic_core_count": {
+                "name": "ASIC Core Count"
+            },
+            "error_rate": {
+                "name": "Error Rate"
+            },
+            "efficiency": {
+                "name": "Efficiency"
+            },
+            "best_difficulty": {
+                "name": "Best Difficulty (All Time)"
+            },
+            "best_difficulty_formatted": {
+                "name": "Best Difficulty (All Time) Formatted"
+            },
+            "best_session_difficulty": {
+                "name": "Best Difficulty (Session)"
+            },
+            "best_session_difficulty_formatted": {
+                "name": "Best Difficulty (Session) Formatted"
+            },
+            "pool_difficulty": {
+                "name": "Pool Difficulty"
+            },
+            "network_difficulty": {
+                "name": "Network Difficulty"
+            },
+            "block_height": {
+                "name": "Block Height"
+            },
+            "shares_accepted": {
+                "name": "Shares Accepted"
+            },
+            "shares_rejected": {
+                "name": "Shares Rejected"
+            },
+            "blocks_found": {
+                "name": "Blocks Found"
+            },
+            "total_blocks_found": {
+                "name": "Total Blocks Found"
+            },
+            "fan_speed": {
+                "name": "Fan Speed"
+            },
+            "fan_rpm": {
+                "name": "Fan RPM"
+            },
+            "fan_2_rpm": {
+                "name": "Fan 2 RPM"
+            },
+            "fan_2_speed": {
+                "name": "Fan 2 Speed"
+            },
+            "manual_fan_speed": {
+                "name": "Manual Fan Speed"
+            },
+            "minimum_fan_speed": {
+                "name": "Minimum Fan Speed"
+            },
+            "wifi_signal": {
+                "name": "WiFi Signal"
+            },
+            "pool_response_time": {
+                "name": "Pool Response Time"
+            },
+            "pool_ping": {
+                "name": "Pool Ping"
+            },
+            "pool_ping_loss": {
+                "name": "Pool Ping Loss"
+            },
+            "uptime": {
+                "name": "Uptime"
+            },
+            "free_memory": {
+                "name": "Free Memory"
+            },
+            "last_reset_reason": {
+                "name": "Last Reset Reason"
+            },
+            "duplicate_hw_nonces": {
+                "name": "Duplicate HW Nonces"
+            },
+            "asic_n_temperature": {
+                "name": "ASIC {index} Temperature"
+            },
+            "asic_n_hash_rate": {
+                "name": "ASIC {index} Hash Rate"
+            },
+            "asic_n_errors": {
+                "name": "ASIC {index} Errors"
+            },
+            "asic_n_error_hash_rate": {
+                "name": "ASIC {index} Error Hash Rate"
+            },
+            "energy": {
+                "name": "Energy"
+            }
+        }
+    },
+    "exceptions": {
+        "restart_failed": {
+            "message": "Failed to restart the miner: {error}"
+        },
+        "resume_failed": {
+            "message": "Failed to resume mining: {error}"
+        },
+        "pause_failed": {
+            "message": "Failed to pause mining: {error}"
         }
     }
 }

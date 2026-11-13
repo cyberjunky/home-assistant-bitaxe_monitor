@@ -21,11 +21,9 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install -r requirements.txt -r requirements_lint.txt
-      # Checks the test suite and tooling; the integration code is not yet clean
-      # under these hooks (pyupgrade, mypy), so it is left out for now
       - run: >-
           pre-commit run --hook-stage manual --config .github/pre-commit-config.yaml
-          --files $(git ls-files tests scripts .github requirements_lint.txt pyproject.toml)
+          --files $(git ls-files custom_components tests scripts .github requirements_lint.txt pyproject.toml)
 
   tests:
     name: Pytest

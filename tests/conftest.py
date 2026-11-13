@@ -8,7 +8,7 @@ from homeassistant.const import CONF_HOST
 from pytest_homeassistant.common import MockConfigEntry
 from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.bitaxe.const import DOMAIN
+from custom_components.bitaxe.const import DOMAIN, STORAGE_KEY, STORAGE_VERSION
 from custom_components.bitaxe.update import (
     DATA_FIRMWARE,
     FIRMWARE_REPO_ESP_MINER,
@@ -16,6 +16,7 @@ from custom_components.bitaxe.update import (
 )
 
 HOST = "192.168.1.100"
+MAC = "aa:bb:cc:dd:ee:ff"
 BASE_URL = f"http://{HOST}"
 INFO_URL = f"{BASE_URL}/api/system/info"
 DASHBOARD_URL = f"{BASE_URL}/api/v2/dashboard"
@@ -31,6 +32,8 @@ def axeos_info() -> dict[str, Any]:
     return {
         "ASICModel": "BM1370",
         "version": "v2.5.0",
+        "macAddr": "AA:BB:CC:DD:EE:FF",
+        "stratumUser": "bc1qwallet.worker",
         "power": 15.2,
         "voltage": 5100,
         "current": 3000,
@@ -45,6 +48,9 @@ def axeos_info() -> dict[str, Any]:
         "fanspeed": 80,
         "fanrpm": 4200,
         "autofanspeed": 1,
+        "overheat_mode": 0,
+        "blockFound": 0,
+        "foundBlocks": 0,
         "uptimeSeconds": 3600,
         "miningPaused": False,
         "isUsingFallbackStratum": 0,
@@ -96,13 +102,21 @@ def clear_firmware_coordinators(hass) -> Generator[None]:
 
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
-    """Return a mocked config entry."""
+    """Return a mocked config entry, identified by host like before 1.3."""
     return MockConfigEntry(
         domain=DOMAIN,
         title="Bitaxe BM1370",
         data={CONF_HOST: HOST},
         unique_id=HOST,
     )
+
+
+def store_snapshot(
+    hass_storage: dict[str, Any], entry: MockConfigEntry, data: dict[str, Any]
+) -> None:
+    """Store the last known data of a miner, as saved by an earlier run."""
+    key = f"{STORAGE_KEY}.{entry.entry_id}"
+    hass_storage[key] = {"version": STORAGE_VERSION, "minor_version": 1, "key": key, "data": data}
 
 
 def mock_api(

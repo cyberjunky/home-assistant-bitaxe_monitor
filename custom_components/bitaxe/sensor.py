@@ -1,5 +1,5 @@
 """Sensor platform for Bitaxe integration."""
-from __future__ import annotations
+
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -8,33 +8,35 @@ from functools import partial
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfFrequency,
+    UnitOfInformation,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
-from .coordinator import BitaxeDataUpdateCoordinator
+from .coordinator import BitaxeConfigEntry, BitaxeDataUpdateCoordinator
+from .entity import BitaxeEntity
+
+HASH_RATE_UNIT = "GH/s"
 
 # SI suffixes used by AxeOS to abbreviate difficulty values
 DIFFICULTY_SUFFIXES = ("", "k", "M", "G", "T", "P", "E")
@@ -72,446 +74,269 @@ def _format_difficulty(value: object) -> str | None:
     return f"{number:.2f}".rstrip("0").rstrip(".") + DIFFICULTY_SUFFIXES[exponent]
 
 
+def _scaled(key: str, factor: float, digits: int) -> Callable[[dict[str, Any]], Any]:
+    """Return a value function that scales a numeric value."""
+
+    def value_fn(data: dict[str, Any]) -> float | None:
+        value = data.get(key)
+        return round(value * factor, digits) if value is not None else None
+
+    return value_fn
+
+
 @dataclass(frozen=True, kw_only=True)
 class BitaxeSensorEntityDescription(SensorEntityDescription):
     """Describes Bitaxe sensor entity."""
 
-    value_fn: Callable[[dict[str, Any]], Any] = lambda _: None
-    # If True, sensor is always created (for computed values)
-    always_create: bool = False
-    # API key that must be present for the sensor to be created (defaults to key)
-    source_key: str | None = None
-    # Custom check whether the sensor should be created (overrides source_key)
+    # Defaults to the value of the API key equal to the entity key
+    value_fn: Callable[[dict[str, Any]], Any] | None = None
+    # Whether the sensor is created, defaults to the entity key being in the data
     exists_fn: Callable[[dict[str, Any]], bool] | None = None
 
 
-# All possible sensor descriptions - only created if the key exists in API data
+def _measurement(key: str, translation_key: str, **kwargs: Any) -> BitaxeSensorEntityDescription:
+    """Return a description of a measurement sensor."""
+    return BitaxeSensorEntityDescription(
+        key=key,
+        translation_key=translation_key,
+        state_class=SensorStateClass.MEASUREMENT,
+        **kwargs,
+    )
+
+
+def _temperature(key: str, translation_key: str, **kwargs: Any) -> BitaxeSensorEntityDescription:
+    """Return a description of a temperature sensor."""
+    return _measurement(
+        key,
+        translation_key,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        **kwargs,
+    )
+
+
+def _hash_rate(key: str, translation_key: str) -> BitaxeSensorEntityDescription:
+    """Return a description of a hash rate sensor."""
+    return _measurement(key, translation_key, native_unit_of_measurement=HASH_RATE_UNIT)
+
+
+# Sensors are only created if their value is in the API data
 SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
-    # ==========================================================================
-    # Power & Electrical
-    # ==========================================================================
-    BitaxeSensorEntityDescription(
-        key="power",
-        name="Power",
+    # Power & electrical
+    _measurement(
+        "power",
+        "power",
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("power"),
-        icon="mdi:flash",
     ),
-    BitaxeSensorEntityDescription(
-        key="maxPower",
-        name="Max Power Limit",
+    _measurement(
+        "maxPower",
+        "max_power",
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("maxPower"),
-        icon="mdi:flash-alert",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    BitaxeSensorEntityDescription(
-        key="voltage",
-        name="Input Voltage",
+    _measurement(
+        "voltage",
+        "input_voltage",
         native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
         device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("voltage"),
-        icon="mdi:sine-wave",
     ),
-    BitaxeSensorEntityDescription(
-        key="nominalVoltage",
-        name="Nominal Voltage",
+    _measurement(
+        "nominalVoltage",
+        "nominal_voltage",
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("nominalVoltage"),
-        icon="mdi:sine-wave",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    BitaxeSensorEntityDescription(
-        key="current",
-        name="Current",
+    _measurement(
+        "current",
+        "current",
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: (
-            round(data.get("current", 0) / 1000, 2) if data.get("current") else None
-        ),
-        icon="mdi:current-ac",
+        # Reported in mA
+        value_fn=_scaled("current", 0.001, 2),
     ),
-    BitaxeSensorEntityDescription(
-        key="coreVoltage",
-        name="Core Voltage Target",
+    _measurement(
+        "coreVoltage",
+        "core_voltage_target",
         native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
         device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("coreVoltage"),
-        icon="mdi:chip",
     ),
-    BitaxeSensorEntityDescription(
-        key="coreVoltageActual",
-        name="Core Voltage Actual",
+    _measurement(
+        "coreVoltageActual",
+        "core_voltage_actual",
         native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
         device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("coreVoltageActual"),
-        icon="mdi:chip",
     ),
-    # ==========================================================================
     # Temperature
-    # ==========================================================================
-    BitaxeSensorEntityDescription(
-        key="temp",
-        name="ASIC Temperature",
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("temp"),
-        icon="mdi:thermometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="temp2",
-        name="ASIC Temperature 2",
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("temp2"),
-        icon="mdi:thermometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="vrTemp",
-        name="VR Temperature",
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("vrTemp"),
-        icon="mdi:thermometer-alert",
-    ),
-    BitaxeSensorEntityDescription(
-        key="vrTempInt",
-        name="VR Internal Temperature",
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("vrTempInt"),
-        icon="mdi:thermometer-alert",
-    ),
-    BitaxeSensorEntityDescription(
-        key="temptarget",
-        name="Target Temperature",
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("temptarget"),
-        icon="mdi:thermometer-check",
-    ),
-    # ==========================================================================
-    # Performance / Hash Rate
-    # ==========================================================================
-    BitaxeSensorEntityDescription(
-        key="hashRate",
-        name="Hash Rate",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("hashRate"),
-        icon="mdi:speedometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="hashRate_1m",
-        name="Hash Rate (1m avg)",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("hashRate_1m"),
-        icon="mdi:speedometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="hashRate_10m",
-        name="Hash Rate (10m avg)",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("hashRate_10m"),
-        icon="mdi:speedometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="hashRate_1h",
-        name="Hash Rate (1h avg)",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("hashRate_1h"),
-        icon="mdi:speedometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="hashRate_1d",
-        name="Hash Rate (1d avg)",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("hashRate_1d"),
-        icon="mdi:speedometer",
-    ),
-    BitaxeSensorEntityDescription(
-        key="expectedHashrate",
-        name="Expected Hash Rate",
-        native_unit_of_measurement="GH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("expectedHashrate"),
-        icon="mdi:speedometer-medium",
-    ),
-    BitaxeSensorEntityDescription(
-        key="frequency",
-        name="ASIC Frequency",
+    _temperature("temp", "asic_temperature"),
+    _temperature("temp2", "asic_temperature_2"),
+    _temperature("vrTemp", "vr_temperature"),
+    _temperature("vrTempInt", "vr_internal_temperature"),
+    _temperature("temptarget", "target_temperature", entity_category=EntityCategory.DIAGNOSTIC),
+    # Performance / hash rate
+    _hash_rate("hashRate", "hash_rate"),
+    _hash_rate("hashRate_1m", "hash_rate_1m"),
+    _hash_rate("hashRate_10m", "hash_rate_10m"),
+    _hash_rate("hashRate_1h", "hash_rate_1h"),
+    _hash_rate("hashRate_1d", "hash_rate_1d"),
+    _hash_rate("expectedHashrate", "expected_hash_rate"),
+    _measurement(
+        "frequency",
+        "asic_frequency",
         native_unit_of_measurement=UnitOfFrequency.MEGAHERTZ,
         device_class=SensorDeviceClass.FREQUENCY,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("frequency"),
-        icon="mdi:sine-wave",
     ),
-    BitaxeSensorEntityDescription(
-        key="smallCoreCount",
-        name="ASIC Core Count",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("smallCoreCount"),
-        icon="mdi:cpu-64-bit",
-    ),
-    BitaxeSensorEntityDescription(
-        key="errorPercentage",
-        name="Error Rate",
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("errorPercentage"),
-        icon="mdi:alert-circle-outline",
-    ),
-    # Computed efficiency - always create if we have power and hashRate
-    BitaxeSensorEntityDescription(
-        key="efficiency",
-        name="Efficiency",
+    _measurement("smallCoreCount", "asic_core_count", entity_category=EntityCategory.DIAGNOSTIC),
+    _measurement("errorPercentage", "error_rate", native_unit_of_measurement=PERCENTAGE),
+    _measurement(
+        "efficiency",
+        "efficiency",
         native_unit_of_measurement="J/TH",
-        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: (
             round(data["power"] / (data["hashRate"] / 1000), 2)
             if data.get("power") is not None and (data.get("hashRate") or 0) > 0
             else None
         ),
-        icon="mdi:leaf",
-        always_create=True,
+        exists_fn=lambda data: "power" in data and "hashRate" in data,
     ),
-    # ==========================================================================
-    # Difficulty & Mining Stats
-    # ==========================================================================
+    # Difficulty & mining stats
     BitaxeSensorEntityDescription(
         key="bestDiff",
-        name="Best Difficulty (All Time)",
+        translation_key="best_difficulty",
         state_class=SensorStateClass.TOTAL,
         value_fn=lambda data: _parse_difficulty(data.get("bestDiff")),
-        icon="mdi:trophy",
     ),
     BitaxeSensorEntityDescription(
         key="bestDiff_formatted",
-        name="Best Difficulty (All Time) Formatted",
+        translation_key="best_difficulty_formatted",
         value_fn=lambda data: _format_difficulty(data.get("bestDiff")),
-        icon="mdi:trophy",
-        source_key="bestDiff",
+        exists_fn=lambda data: "bestDiff" in data,
     ),
-    BitaxeSensorEntityDescription(
-        key="bestSessionDiff",
-        name="Best Difficulty (Session)",
-        state_class=SensorStateClass.MEASUREMENT,
+    _measurement(
+        "bestSessionDiff",
+        "best_session_difficulty",
         value_fn=lambda data: _parse_difficulty(data.get("bestSessionDiff")),
-        icon="mdi:trophy-outline",
     ),
     BitaxeSensorEntityDescription(
         key="bestSessionDiff_formatted",
-        name="Best Difficulty (Session) Formatted",
+        translation_key="best_session_difficulty_formatted",
         value_fn=lambda data: _format_difficulty(data.get("bestSessionDiff")),
-        icon="mdi:trophy-outline",
-        source_key="bestSessionDiff",
+        exists_fn=lambda data: "bestSessionDiff" in data,
     ),
-    BitaxeSensorEntityDescription(
-        key="poolDifficulty",
-        name="Pool Difficulty",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("poolDifficulty"),
-        icon="mdi:target",
-    ),
-    BitaxeSensorEntityDescription(
-        key="networkDifficulty",
-        name="Network Difficulty",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("networkDifficulty"),
-        icon="mdi:earth",
-    ),
+    _measurement("poolDifficulty", "pool_difficulty"),
+    _measurement("networkDifficulty", "network_difficulty"),
     BitaxeSensorEntityDescription(
         key="blockHeight",
-        name="Block Height",
+        translation_key="block_height",
         state_class=SensorStateClass.TOTAL,
-        value_fn=lambda data: data.get("blockHeight"),
-        icon="mdi:cube-outline",
     ),
-    # ==========================================================================
-    # Share Counters
-    # ==========================================================================
+    # Share counters
     BitaxeSensorEntityDescription(
         key="sharesAccepted",
-        name="Shares Accepted",
+        translation_key="shares_accepted",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("sharesAccepted"),
-        icon="mdi:check-circle",
     ),
     BitaxeSensorEntityDescription(
         key="sharesRejected",
-        name="Shares Rejected",
+        translation_key="shares_rejected",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("sharesRejected"),
-        icon="mdi:close-circle",
     ),
     BitaxeSensorEntityDescription(
         key="blockFound",
-        name="Blocks Found",
+        translation_key="blocks_found",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("blockFound"),
-        icon="mdi:cube",
     ),
-    # Legacy key for blocks found
+    # Older firmware reports foundBlocks instead
     BitaxeSensorEntityDescription(
         key="foundBlocks",
-        name="Blocks Found",
+        translation_key="blocks_found",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("foundBlocks"),
-        icon="mdi:cube",
+        exists_fn=lambda data: "foundBlocks" in data and "blockFound" not in data,
     ),
     BitaxeSensorEntityDescription(
         key="totalFoundBlocks",
-        name="Total Blocks Found",
+        translation_key="total_blocks_found",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("totalFoundBlocks"),
-        icon="mdi:cube-outline",
     ),
-    # ==========================================================================
-    # Fan & Cooling
-    # ==========================================================================
-    BitaxeSensorEntityDescription(
-        key="fanspeed",
-        name="Fan Speed",
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("fanspeed"),
-        icon="mdi:fan",
-    ),
-    BitaxeSensorEntityDescription(
-        key="fanrpm",
-        name="Fan RPM",
-        native_unit_of_measurement="RPM",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("fanrpm"),
-        icon="mdi:fan",
-    ),
+    # Fan & cooling
+    _measurement("fanspeed", "fan_speed", native_unit_of_measurement=PERCENTAGE),
+    _measurement("fanrpm", "fan_rpm", native_unit_of_measurement="RPM"),
     # AxeOS reports fan2rpm, NerdQAxe fanrpm2/fanspeed2 (zero without a second fan)
-    BitaxeSensorEntityDescription(
-        key="fan2rpm",
-        name="Fan 2 RPM",
+    _measurement(
+        "fan2rpm",
+        "fan_2_rpm",
         native_unit_of_measurement="RPM",
-        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.get("fan2rpm", data.get("fanrpm2")),
         exists_fn=lambda data: "fan2rpm" in data or data.get("fanCount", 0) > 1,
-        icon="mdi:fan",
     ),
-    BitaxeSensorEntityDescription(
-        key="fanspeed2",
-        name="Fan 2 Speed",
+    _measurement(
+        "fanspeed2",
+        "fan_2_speed",
         native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("fanspeed2"),
         exists_fn=lambda data: data.get("fanCount", 0) > 1,
-        icon="mdi:fan",
     ),
-    BitaxeSensorEntityDescription(
-        key="autofanspeed",
-        name="Auto Fan Speed",
-        value_fn=lambda data: "On" if data.get("autofanspeed") else "Off",
-        icon="mdi:fan-auto",
-    ),
-    BitaxeSensorEntityDescription(
-        key="manualFanSpeed",
-        name="Manual Fan Speed",
+    _measurement(
+        "manualFanSpeed",
+        "manual_fan_speed",
         native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("manualFanSpeed"),
-        icon="mdi:fan-speed-1",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    BitaxeSensorEntityDescription(
-        key="minFanSpeed",
-        name="Minimum Fan Speed",
+    _measurement(
+        "minFanSpeed",
+        "minimum_fan_speed",
         native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("minFanSpeed"),
-        icon="mdi:fan-speed-1",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    # ==========================================================================
-    # Network & Connectivity
-    # ==========================================================================
-    BitaxeSensorEntityDescription(
-        key="wifiRSSI",
-        name="WiFi Signal",
+    # Network & connectivity
+    _measurement(
+        "wifiRSSI",
+        "wifi_signal",
         native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("wifiRSSI"),
-        icon="mdi:wifi",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    BitaxeSensorEntityDescription(
-        key="responseTime",
-        name="Pool Response Time",
+    _measurement(
+        "responseTime",
+        "pool_response_time",
         native_unit_of_measurement=UnitOfTime.MILLISECONDS,
         device_class=SensorDeviceClass.DURATION,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("responseTime"),
-        icon="mdi:timer-outline",
     ),
-    BitaxeSensorEntityDescription(
-        key="lastpingrtt",
-        name="Pool Ping",
+    _measurement(
+        "lastpingrtt",
+        "pool_ping",
         native_unit_of_measurement=UnitOfTime.MILLISECONDS,
         device_class=SensorDeviceClass.DURATION,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("lastpingrtt"),
-        icon="mdi:timer-outline",
     ),
-    BitaxeSensorEntityDescription(
-        key="recentpingloss",
-        name="Pool Ping Loss",
+    _measurement(
+        "recentpingloss",
+        "pool_ping_loss",
         native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
         # Reported as a fraction (0-1)
-        value_fn=lambda data: (
-            round(data["recentpingloss"] * 100, 1)
-            if data.get("recentpingloss") is not None
-            else None
-        ),
-        icon="mdi:lan-disconnect",
+        value_fn=_scaled("recentpingloss", 100, 1),
     ),
-    # ==========================================================================
-    # System Status
-    # ==========================================================================
+    # System status
     BitaxeSensorEntityDescription(
         key="uptimeSeconds",
-        name="Uptime",
+        translation_key="uptime",
         native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("uptimeSeconds"),
-        icon="mdi:clock-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
-    BitaxeSensorEntityDescription(
-        key="freeHeap",
-        name="Free Memory",
-        native_unit_of_measurement="B",
+    _measurement(
+        "freeHeap",
+        "free_memory",
+        native_unit_of_measurement=UnitOfInformation.BYTES,
         device_class=SensorDeviceClass.DATA_SIZE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("freeHeap"),
-        icon="mdi:memory",
-        entity_registry_enabled_default=False,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BitaxeSensorEntityDescription(
         key="lastResetReason",
-        name="Last Reset Reason",
+        translation_key="last_reset_reason",
+        entity_category=EntityCategory.DIAGNOSTIC,
         # AxeOS reports resetReason as text, NerdQAxe lastResetReason as a UI
         # translation key like SYSTEM.RESET_POWERON
         value_fn=lambda data: (
@@ -520,39 +345,14 @@ SENSOR_DESCRIPTIONS: tuple[BitaxeSensorEntityDescription, ...] = (
             else data.get("resetReason")
         ),
         exists_fn=lambda data: "lastResetReason" in data or "resetReason" in data,
-        icon="mdi:restart-alert",
     ),
     BitaxeSensorEntityDescription(
         key="duplicateHWNonces",
-        name="Duplicate HW Nonces",
+        translation_key="duplicate_hw_nonces",
         state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda data: data.get("duplicateHWNonces"),
-        icon="mdi:content-duplicate",
-    ),
-    BitaxeSensorEntityDescription(
-        key="overheat_mode",
-        name="Overheat Mode",
-        value_fn=lambda data: "Active" if data.get("overheat_mode") else "Normal",
-        icon="mdi:thermometer-alert",
-    ),
-    BitaxeSensorEntityDescription(
-        key="overclockEnabled",
-        name="Overclock",
-        value_fn=lambda data: "Enabled" if data.get("overclockEnabled") else "Disabled",
-        icon="mdi:speedometer",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )
-
-
-def _should_create_sensor(
-    description: BitaxeSensorEntityDescription, data: dict[str, Any]
-) -> bool:
-    """Determine if a sensor should be created based on available data."""
-    if description.always_create:
-        return True
-    if description.exists_fn is not None:
-        return description.exists_fn(data)
-    return (description.source_key or description.key) in data
 
 
 def _asic_temp(data: dict[str, Any], idx: int) -> Any:
@@ -582,176 +382,131 @@ def _chip_hashrate(data: dict[str, Any], idx: int) -> Any:
     return round(valid + (errors or 0), 2)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up Bitaxe sensor based on a config entry."""
-    coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    data = coordinator.data or {}
+def _asic_descriptions(data: dict[str, Any]) -> list[BitaxeSensorEntityDescription]:
+    """Return the descriptions of the per-ASIC sensors."""
+    descriptions: list[BitaxeSensorEntityDescription] = []
 
-    entities: list[SensorEntity] = []
-
-    # Add sensors only if their key exists in the data (auto-detection)
-    for description in SENSOR_DESCRIPTIONS:
-        if _should_create_sensor(description, data):
-            entities.append(BitaxeSensor(coordinator, description, entry))
-
-    # Dynamically create ASIC temp sensors based on actual data (asicTemps array)
-    asic_temps = data.get("asicTemps", [])
-    for i in range(len(asic_temps)):
-        entities.append(
-            BitaxeSensor(
-                coordinator,
-                BitaxeSensorEntityDescription(
-                    key=f"asicTemp{i + 1}",
-                    name=f"ASIC {i + 1} Temperature",
-                    native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-                    device_class=SensorDeviceClass.TEMPERATURE,
-                    state_class=SensorStateClass.MEASUREMENT,
-                    value_fn=partial(_asic_temp, idx=i),
-                    icon="mdi:thermometer",
-                ),
-                entry,
+    for i in range(len(data.get("asicTemps", []))):
+        descriptions.append(
+            _temperature(
+                f"asicTemp{i + 1}",
+                "asic_n_temperature",
+                translation_placeholders={"index": str(i + 1)},
+                value_fn=partial(_asic_temp, idx=i),
             )
         )
 
-    # Dynamically create per-ASIC hash rate sensors from hashrateMonitor
-    hashrate_monitor = data.get("hashrateMonitor", {})
-    asics = hashrate_monitor.get("asics", [])
-    for i in range(len(asics)):
-        # Total hash rate for this ASIC
-        entities.append(
-            BitaxeSensor(
-                coordinator,
-                BitaxeSensorEntityDescription(
-                    key=f"asic{i + 1}_hashrate",
-                    name=f"ASIC {i + 1} Hash Rate",
-                    native_unit_of_measurement="GH/s",
-                    state_class=SensorStateClass.MEASUREMENT,
+    # Per-ASIC hash rates come from hashrateMonitor on AxeOS, or from the v2
+    # dashboard on NerdQAxe firmware
+    if asics := data.get("hashrateMonitor", {}).get("asics", []):
+        for i in range(len(asics)):
+            placeholders = {"index": str(i + 1)}
+            descriptions.append(
+                _measurement(
+                    f"asic{i + 1}_hashrate",
+                    "asic_n_hash_rate",
+                    native_unit_of_measurement=HASH_RATE_UNIT,
+                    translation_placeholders=placeholders,
                     value_fn=partial(_asic_stat, idx=i, field="total"),
-                    icon="mdi:speedometer",
-                ),
-                entry,
+                )
             )
-        )
-        # Error count for this ASIC
-        entities.append(
-            BitaxeSensor(
-                coordinator,
+            descriptions.append(
                 BitaxeSensorEntityDescription(
                     key=f"asic{i + 1}_errors",
-                    name=f"ASIC {i + 1} Errors",
+                    translation_key="asic_n_errors",
                     state_class=SensorStateClass.TOTAL_INCREASING,
+                    translation_placeholders=placeholders,
                     value_fn=partial(_asic_stat, idx=i, field="errorCount"),
-                    icon="mdi:alert-circle",
-                ),
-                entry,
+                )
             )
-        )
-
-    # Dynamically create per-ASIC hash rate sensors from the NerdQAxe v2 dashboard
-    chips = data.get("chips", [])
-    for i in range(len(chips)):
-        entities.append(
-            BitaxeSensor(
-                coordinator,
-                BitaxeSensorEntityDescription(
-                    key=f"asic{i + 1}_hashrate",
-                    name=f"ASIC {i + 1} Hash Rate",
-                    native_unit_of_measurement="GH/s",
-                    state_class=SensorStateClass.MEASUREMENT,
+    else:
+        for i in range(len(data.get("chips", []))):
+            placeholders = {"index": str(i + 1)}
+            descriptions.append(
+                _measurement(
+                    f"asic{i + 1}_hashrate",
+                    "asic_n_hash_rate",
+                    native_unit_of_measurement=HASH_RATE_UNIT,
+                    translation_placeholders=placeholders,
                     value_fn=partial(_chip_hashrate, idx=i),
-                    icon="mdi:speedometer",
-                ),
-                entry,
+                )
             )
-        )
-        entities.append(
-            BitaxeSensor(
-                coordinator,
-                BitaxeSensorEntityDescription(
-                    key=f"asic{i + 1}_error_hashrate",
-                    name=f"ASIC {i + 1} Error Hash Rate",
-                    native_unit_of_measurement="GH/s",
-                    state_class=SensorStateClass.MEASUREMENT,
+            descriptions.append(
+                _measurement(
+                    f"asic{i + 1}_error_hashrate",
+                    "asic_n_error_hash_rate",
+                    native_unit_of_measurement=HASH_RATE_UNIT,
+                    translation_placeholders=placeholders,
                     value_fn=partial(_chip_stat, idx=i, field="errorHashRate"),
-                    icon="mdi:alert-circle",
-                ),
-                entry,
+                )
             )
-        )
 
+    return descriptions
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: BitaxeConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up Bitaxe sensor based on a config entry."""
+    coordinator = entry.runtime_data
+    data = coordinator.snapshot
+
+    entities: list[SensorEntity] = [
+        BitaxeSensor(coordinator, description)
+        for description in SENSOR_DESCRIPTIONS
+        if (description.exists_fn(data) if description.exists_fn else description.key in data)
+    ]
+    entities.extend(
+        BitaxeSensor(coordinator, description) for description in _asic_descriptions(data)
+    )
     # Integrated energy (kWh) sensor for the Energy Dashboard, derived from power
     if "power" in data:
-        entities.append(BitaxeEnergySensor(coordinator, entry))
+        entities.append(BitaxeEnergySensor(coordinator))
 
     async_add_entities(entities)
 
 
-class BitaxeSensor(CoordinatorEntity[BitaxeDataUpdateCoordinator], SensorEntity):
+class BitaxeSensor(BitaxeEntity, SensorEntity):
     """Representation of a Bitaxe sensor."""
 
     entity_description: BitaxeSensorEntityDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
         coordinator: BitaxeDataUpdateCoordinator,
         description: BitaxeSensorEntityDescription,
-        entry: ConfigEntry,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Bitaxe",
-            "model": coordinator.data.get("ASICModel", "Unknown"),
-            "sw_version": coordinator.data.get("version", "Unknown"),
-        }
 
     @property
     def native_value(self) -> Any:
         """Return the state of the sensor."""
-        if self.coordinator.data is None:
+        if (data := self.coordinator.data) is None:
             return None
-        return self.entity_description.value_fn(self.coordinator.data)
+        if self.entity_description.value_fn is None:
+            return data.get(self.entity_description.key)
+        return self.entity_description.value_fn(data)
 
 
-class BitaxeEnergySensor(
-    CoordinatorEntity[BitaxeDataUpdateCoordinator], RestoreEntity, SensorEntity
-):
+class BitaxeEnergySensor(BitaxeEntity, RestoreSensor):
     """Energy sensor that integrates the power sensor (W) into kWh over time.
 
     Trapezoidal integration is used so the device can be added to the Home
     Assistant Energy Dashboard without requiring a separate Riemann sum helper.
     """
 
-    _attr_has_entity_name = True
-    _attr_name = "Energy"
+    _attr_translation_key = "energy"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:lightning-bolt"
 
-    def __init__(
-        self, coordinator: BitaxeDataUpdateCoordinator, entry: ConfigEntry
-    ) -> None:
+    def __init__(self, coordinator: BitaxeDataUpdateCoordinator) -> None:
         """Initialize the energy sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_energy"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title,
-            "manufacturer": "Bitaxe",
-            "model": coordinator.data.get("ASICModel", "Unknown"),
-            "sw_version": coordinator.data.get("version", "Unknown"),
-        }
+        super().__init__(coordinator, "energy")
         self._energy_kwh: float = 0.0
         self._last_update: datetime | None = None
         self._last_power: float | None = None
@@ -759,11 +514,13 @@ class BitaxeEnergySensor(
     async def async_added_to_hass(self) -> None:
         """Restore the accumulated energy value after a restart."""
         await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state is not None and last_state.state not in (
-            None,
-            STATE_UNKNOWN,
-            STATE_UNAVAILABLE,
+        if (last_data := await self.async_get_last_sensor_data()) is not None and isinstance(
+            last_data.native_value, (int, float)
+        ):
+            self._energy_kwh = float(last_data.native_value)
+        # Versions before 1.3 only stored the state
+        elif (last_state := await self.async_get_last_state()) is not None and (
+            last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
         ):
             try:
                 self._energy_kwh = float(last_state.state)
@@ -777,17 +534,9 @@ class BitaxeEnergySensor(
         now = dt_util.utcnow()
         # After a failed update the coordinator keeps stale data; drop the reading
         # so the outage is not integrated as if the miner kept drawing power
-        power = (
-            data.get("power")
-            if data and self.coordinator.last_update_success
-            else None
-        )
+        power = data.get("power") if data and self.coordinator.last_update_success else None
 
-        if (
-            power is not None
-            and self._last_power is not None
-            and self._last_update is not None
-        ):
+        if power is not None and self._last_power is not None and self._last_update is not None:
             elapsed_hours = (now - self._last_update).total_seconds() / 3600
             if elapsed_hours > 0:
                 avg_power = (self._last_power + power) / 2

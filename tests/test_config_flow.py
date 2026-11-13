@@ -14,7 +14,7 @@ from pytest_homeassistant.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.bitaxe.const import DOMAIN
 
-from .conftest import HOST, INFO_URL, axeos_info
+from .conftest import HOST, INFO_URL, MAC, axeos_info
 
 NEW_HOST = "192.168.1.101"
 
@@ -45,6 +45,21 @@ async def test_user_flow_success(hass: HomeAssistant, aioclient_mock: AiohttpCli
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Bitaxe BM1370"
     assert result["data"] == {CONF_HOST: HOST}
+    assert result["result"].unique_id == MAC
+
+
+async def test_user_flow_without_mac(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Firmware that does not report a MAC address is identified by host."""
+    info = axeos_info()
+    del info["macAddr"]
+    aioclient_mock.get(INFO_URL, json=info)
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HOST: HOST})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == HOST
 
 
@@ -56,6 +71,8 @@ async def test_user_flow_success(hass: HomeAssistant, aioclient_mock: AiohttpCli
         {"exc": TimeoutError()},
         {"status": 404},
         {"text": "<html>captive portal</html>"},
+        # Valid JSON that is not an object
+        {"json": [1, 2, 3]},
     ],
 )
 async def test_user_flow_cannot_connect(
@@ -76,17 +93,37 @@ async def test_user_flow_cannot_connect(
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
-async def test_user_flow_unknown_error(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
-) -> None:
-    """A non-object JSON response is reported as an unknown error."""
-    aioclient_mock.get(INFO_URL, json=[1, 2, 3])
-
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HOST: HOST})
+async def test_user_flow_unknown_error(hass: HomeAssistant) -> None:
+    """Unexpected exceptions are reported as an unknown error."""
+    with patch(
+        "custom_components.bitaxe.config_flow.BitaxeApiClient.async_get_system_info",
+        side_effect=RuntimeError,
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: HOST}
+        )
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "unknown"}
+
+
+async def test_user_flow_known_miner_new_address(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Adding a known miner at a new address updates the existing entry."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: HOST}, unique_id=MAC)
+    entry.add_to_hass(hass)
+    aioclient_mock.get(f"http://{NEW_HOST}/api/system/info", json=axeos_info())
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HOST: NEW_HOST}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data == {CONF_HOST: NEW_HOST}
 
 
 async def test_user_flow_already_configured(
@@ -125,7 +162,26 @@ async def test_reconfigure_success(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert mock_config_entry.data == {CONF_HOST: NEW_HOST}
-    assert mock_config_entry.unique_id == NEW_HOST
+    # Entries identified by host move to the MAC address
+    assert mock_config_entry.unique_id == MAC
+
+
+async def test_reconfigure_wrong_device(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """An entry identified by MAC address cannot be pointed at another miner."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_HOST: HOST}, unique_id="11:22:33:44:55:66")
+    entry.add_to_hass(hass)
+    aioclient_mock.get(f"http://{NEW_HOST}/api/system/info", json=axeos_info())
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HOST: NEW_HOST}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_device"
+    assert entry.data == {CONF_HOST: HOST}
 
 
 async def test_reconfigure_cannot_connect(

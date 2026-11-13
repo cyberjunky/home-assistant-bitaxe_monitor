@@ -1,0 +1,181 @@
+{
+    "entity": {
+        "binary_sensor": {
+            "using_fallback": {
+                "default": "mdi:swap-horizontal"
+            },
+            "overheat": {
+                "default": "mdi:thermometer-alert"
+            },
+            "auto_fan_speed": {
+                "default": "mdi:fan-auto"
+            },
+            "overclock": {
+                "default": "mdi:speedometer"
+            }
+        },
+        "switch": {
+            "mining": {
+                "default": "mdi:pickaxe"
+            }
+        },
+        "sensor": {
+            "power": {
+                "default": "mdi:flash"
+            },
+            "max_power": {
+                "default": "mdi:flash-alert"
+            },
+            "input_voltage": {
+                "default": "mdi:sine-wave"
+            },
+            "nominal_voltage": {
+                "default": "mdi:sine-wave"
+            },
+            "current": {
+                "default": "mdi:current-ac"
+            },
+            "core_voltage_target": {
+                "default": "mdi:chip"
+            },
+            "core_voltage_actual": {
+                "default": "mdi:chip"
+            },
+            "asic_temperature": {
+                "default": "mdi:thermometer"
+            },
+            "asic_temperature_2": {
+                "default": "mdi:thermometer"
+            },
+            "vr_temperature": {
+                "default": "mdi:thermometer-alert"
+            },
+            "vr_internal_temperature": {
+                "default": "mdi:thermometer-alert"
+            },
+            "target_temperature": {
+                "default": "mdi:thermometer-check"
+            },
+            "hash_rate": {
+                "default": "mdi:speedometer"
+            },
+            "hash_rate_1m": {
+                "default": "mdi:speedometer"
+            },
+            "hash_rate_10m": {
+                "default": "mdi:speedometer"
+            },
+            "hash_rate_1h": {
+                "default": "mdi:speedometer"
+            },
+            "hash_rate_1d": {
+                "default": "mdi:speedometer"
+            },
+            "expected_hash_rate": {
+                "default": "mdi:speedometer-medium"
+            },
+            "asic_frequency": {
+                "default": "mdi:sine-wave"
+            },
+            "asic_core_count": {
+                "default": "mdi:cpu-64-bit"
+            },
+            "error_rate": {
+                "default": "mdi:alert-circle-outline"
+            },
+            "efficiency": {
+                "default": "mdi:leaf"
+            },
+            "best_difficulty": {
+                "default": "mdi:trophy"
+            },
+            "best_difficulty_formatted": {
+                "default": "mdi:trophy"
+            },
+            "best_session_difficulty": {
+                "default": "mdi:trophy-outline"
+            },
+            "best_session_difficulty_formatted": {
+                "default": "mdi:trophy-outline"
+            },
+            "pool_difficulty": {
+                "default": "mdi:target"
+            },
+            "network_difficulty": {
+                "default": "mdi:earth"
+            },
+            "block_height": {
+                "default": "mdi:cube-outline"
+            },
+            "shares_accepted": {
+                "default": "mdi:check-circle"
+            },
+            "shares_rejected": {
+                "default": "mdi:close-circle"
+            },
+            "blocks_found": {
+                "default": "mdi:cube"
+            },
+            "total_blocks_found": {
+                "default": "mdi:cube-outline"
+            },
+            "fan_speed": {
+                "default": "mdi:fan"
+            },
+            "fan_rpm": {
+                "default": "mdi:fan"
+            },
+            "fan_2_rpm": {
+                "default": "mdi:fan"
+            },
+            "fan_2_speed": {
+                "default": "mdi:fan"
+            },
+            "manual_fan_speed": {
+                "default": "mdi:fan-speed-1"
+            },
+            "minimum_fan_speed": {
+                "default": "mdi:fan-speed-1"
+            },
+            "wifi_signal": {
+                "default": "mdi:wifi"
+            },
+            "pool_response_time": {
+                "default": "mdi:timer-outline"
+            },
+            "pool_ping": {
+                "default": "mdi:timer-outline"
+            },
+            "pool_ping_loss": {
+                "default": "mdi:lan-disconnect"
+            },
+            "uptime": {
+                "default": "mdi:clock-outline"
+            },
+            "free_memory": {
+                "default": "mdi:memory"
+            },
+            "last_reset_reason": {
+                "default": "mdi:restart-alert"
+            },
+            "duplicate_hw_nonces": {
+                "default": "mdi:content-duplicate"
+            },
+            "asic_n_temperature": {
+                "default": "mdi:thermometer"
+            },
+            "asic_n_hash_rate": {
+                "default": "mdi:speedometer"
+            },
+            "asic_n_errors": {
+                "default": "mdi:alert-circle"
+            },
+            "asic_n_error_hash_rate": {
+                "default": "mdi:alert-circle"
+            },
+            "energy": {
+                "default": "mdi:lightning-bolt"
+            }
+        }
+    }
+}
